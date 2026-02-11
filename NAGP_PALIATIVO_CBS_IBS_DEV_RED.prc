@@ -34,16 +34,27 @@ BEGIN
   UPDATE MLF_NFITEM XI
    SET XI.VLRIMPOSTOIBSUF =
          CASE
-           WHEN XI.PERALIQREDIBSUF = 100 THEN 0
-           ELSE ROUND(XI.VLRBASEIBSUF * (XI.PERALIQIBSUF / 100), 2)
+           WHEN NVL(XI.PERALIQREDIBSUF,0) = 100 THEN 0
+           ELSE ROUND(
+                  XI.VLRBASEIBSUF *
+                  ((XI.PERALIQIBSUF *
+                   (1 - NVL(XI.PERALIQREDIBSUF,0) / 100)
+                  ) / 100)
+                , 2)
          END,
        XI.VLRIMPOSTOCBS =
          CASE
-           WHEN XI.PERALIQREDCBS = 100 THEN 0
-           ELSE ROUND(XI.VLRBASECBS * (XI.PERALIQCBS / 100), 2)
+           WHEN NVL(XI.PERALIQREDCBS,0) = 100 THEN 0
+           ELSE ROUND(
+                  XI.VLRBASECBS *
+                  ((XI.PERALIQCBS *
+                   (1 - NVL(XI.PERALIQREDCBS,0) / 100)
+                  ) / 100)
+                , 2)
          END
-  WHERE XI.SEQNF = rej.SEQNF
-    AND (XI.PERALIQIBSUF IS NOT NULL OR PERALIQCBS IS NOT NULL);
+ WHERE XI.SEQNF = rej.SEQNF
+   AND (XI.PERALIQIBSUF IS NOT NULL
+       OR XI.PERALIQCBS IS NOT NULL);
  
   COMMIT;
   SP_EXPORTANFE(rej.SEQNOTAFISCAL, 'E');
