@@ -1,0 +1,33 @@
+CREATE OR REPLACE PROCEDURE CONSINCO.NAGP_LOG_GE_CONSULTA (
+    p_seqconsulta   IN NUMBER,
+    p_tipo_operacao IN VARCHAR2
+) AS
+    PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+    INSERT INTO NAGT_GE_CONSULTA_LOG (
+        SEQCONSULTA,
+        CAMPO_ALTERADO,
+        VALOR_ANTIGO,
+        USUARIO_ALTERACAO,
+        DATA_ALTERACAO,
+        TIPO_OPERACAO
+    )
+    SELECT
+        p_seqconsulta,
+        'INSTRUCAOSQL',
+        TO_LOB(INSTRUCAOSQL),                
+        SYS_CONTEXT('USERENV','SESSION_USER'),
+        SYSDATE,
+        p_tipo_operacao
+    FROM GE_CONSULTA
+   WHERE SEQCONSULTA = p_seqconsulta
+     AND INSTRUCAOSQL IS NOT NULL;
+
+    COMMIT;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        NULL;
+    WHEN OTHERS THEN
+        ROLLBACK;
+        RAISE;
+END;
