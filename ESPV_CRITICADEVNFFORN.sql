@@ -1,0 +1,277 @@
+CREATE OR REPLACE VIEW ESPV_CRITICADEVNFFORN AS
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       1 CODCRITICA,
+       'Não é permitido a emissão para mesma razão neste CGO, verifique!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAX_EMPRESA E ON E.NROEMPRESA = A.NROEMPRESA
+ WHERE 1=1
+   AND A.CODGERALOPER IN (211,240,934,811)
+   AND EXISTS (SELECT 1 FROM MAX_EMPRESA D
+                WHERE D.NROEMPRESA = A.SEQFORNECEDOR
+                  AND SUBSTR((LPAD(E.NROCGC,13,0)),0,9)= SUBSTR((LPAD(D.NROCGC,13,0)),0,9))
+
+UNION ALL
+-- Ticket 619419
+-- Adicionado por Giuliano em 18/08/2025
+-- CGO 853 apenas para produtor rural
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       2 CODCRITICA,
+       'Este CGO somente pode ser utilizado para fornecedores cadastrados como Produtor Rural' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAX_EMPRESA E ON E.NROEMPRESA = A.NROEMPRESA
+ WHERE 1=1
+   AND A.CODGERALOPER = 853
+   AND EXISTS (SELECT 1 FROM GE_PESSOA G WHERE G.SEQPESSOA = A.SEQFORNECEDOR AND NVL(G.INDPRODRURAL, 'N') = 'N')
+
+
+
+UNION ALL
+-- Ticket 619423
+-- Adicionado por Giuliano em 18/08/2025
+-- CGO 802 nao pode ser utilizado para fornec do grupo Nagumo
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       3 CODCRITICA,
+       'Este CGO não pode ser utilizado para CNPJs do grupo [NAGUMO]' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAX_EMPRESA E ON E.NROEMPRESA = A.NROEMPRESA
+ WHERE 1=1
+   AND A.CODGERALOPER = 802
+   AND SEQFORNECEDOR < 999
+
+UNION ALL
+-- Ticket 622611
+-- Adicionado por Giuliano em 25/08/2025
+-- Barra CGO 814 para empresas fora RJ
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       4 CODCRITICA,
+       'Não é permitido a utilização do CGO 814 para operação de empresas em SP!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAX_EMPRESA E ON E.NROEMPRESA = A.NROEMPRESA
+ WHERE 1=1
+   AND A.CODGERALOPER = 814
+   AND E.UF != 'RJ'
+
+UNION ALL
+-- Ticket 622538
+-- Adicionado por Giuliano em 25/08/2025
+-- CGO 927 Nao permite emitir Finalidade Uso/Consumo
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       5 CODCRITICA,
+       'Não é permitido a utilização do CGO 927 para emissão de produtos com finalidade Uso/Consumo!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+   AND A.CODGERALOPER = 927
+   AND F.FINALIDADEFAMILIA IN ('O','U')
+
+UNION ALL
+-- Ticket 633670
+-- Adicionado por Giuliano em 22/09/2025
+-- CGO 240  apenas permite emitir Finalidade Uso/Consumo
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       6 CODCRITICA,
+       'Não é permitido a utilização do CGO 240 para emissão de produtos com finalidade exceto Uso/Consumo!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+   AND A.CODGERALOPER = 240
+   AND F.FINALIDADEFAMILIA NOT IN ('O','U')
+
+UNION ALL
+-- Ticket 645195 + 698285
+-- Adicionado por Giuliano em 23/10/2025 + 04/03/2026
+-- CGO 811 Nao permite emissao para finalidades Uso Consumo - Ativo - Outros Insumos
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       7 CODCRITICA,
+       'Não é permitido a utilização do CGO '||A.CODGERALOPER||' para emissão do produto '||P.SEQPRODUTO|| ' - '|| P.DESCCOMPLETA MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+   AND A.CODGERALOPER IN (811,802)
+   AND F.FINALIDADEFAMILIA IN ('A', 'U', 'O')
+
+UNION ALL
+-- Ticket 628760
+-- Adicionado por Giuliano em13/11/2025
+-- Validacao Emissao CGOs x Local
+
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       8 CODCRITICA,
+       'CGO '||A.CODGERALOPER||' Não permitido para emissão através do local '||LOCAL MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MRL_LOCAL B ON B.SEQLOCAL = A.SEQLOCAL AND B.NROEMPRESA = A.NROEMPRESA
+ WHERE 1=1
+   AND A.CODGERALOPER IN (811,927,801) AND B.LOCAL = 'AVARIA'
+    OR A.CODGERALOPER IN (933,934,935) AND B.LOCAL = 'LOJA'
+
+-- Ticket 654672
+-- Adicionado por Giuliano em 17/11/2025
+-- Nao permitido Dev para Fornec CGO diferente de 802/814
+-- ESPV_CRITICADEVNFFORN
+
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       9 CODCRITICA,
+       'CGO '||A.CODGERALOPER||' Não permitido nesta operação. Verifique!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+   AND A.SEQFORNECEDOR > 999
+   AND F.FINALIDADEFAMILIA = 'R'
+   AND A.NROEMPRESA < 500
+   AND CODGERALOPER NOT IN (802,814,853)
+
+UNION ALL
+
+-- Ticket 658925
+-- Adicionado por Giuliano em 27/11/2025
+-- Nao permite vincular NF emitidas antes de 01/06/2025
+
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       10 CODCRITICA,
+       'CGO '||A.CODGERALOPER || ' não permitido para referências anteriores a 01/06/2025. Entre em contato com o suporte da loja' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MLF_NOTAFISCAL X ON X.SEQNF = A.SEQNFREF
+ WHERE 1=1
+   AND A.CODGERALOPER = 935
+   AND X.DTAEMISSAO <= DATE '2025-06-01'
+
+-- Ticket 666371
+-- Adicionado por Giuliano/Julio em 15/12/2025
+-- Nao permitido Dev pelo CGO 211 para finalizade Emb/Rev
+-- ESPV_CRITICADEVNFFORN
+
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       11 CODCRITICA,
+       'CGO '||A.CODGERALOPER||' Não permitido nesta operação. Verifique!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+  -- AND A.SEQFORNECEDOR > 999
+   AND F.FINALIDADEFAMILIA IN ('E','R')
+   AND CODGERALOPER = 211
+
+-- Ticket 667601-685520
+-- Nao perm CGO mesma Razao
+-- Giuliano/Julio 17/12/2025
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       12 CODCRITICA,
+       'Não é permitido a emissão para razão diferente neste CGO, verifique!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAX_EMPRESA E ON E.NROEMPRESA = A.NROEMPRESA
+ WHERE 1=1
+   AND A.CODGERALOPER IN (935,801)
+   AND EXISTS (SELECT 1 FROM MAX_EMPRESA D
+                WHERE D.NROEMPRESA = A.SEQFORNECEDOR
+                  AND SUBSTR((LPAD(E.NROCGC,13,0)),0,9) != SUBSTR((LPAD(D.NROCGC,13,0)),0,9))
+
+-- Ticket 667627
+-- Adicionado por Giuliano/Julio em 17/12/2025
+-- Nao permitido CGO 933 Exceto RJ
+
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       13 CODCRITICA,
+       'CGO '||A.CODGERALOPER||' Não permitido nesta operação. Verifique!' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+   AND A.CODGERALOPER = 933
+   AND A.NROEMPRESA NOT IN (36,53)
+
+-- Adicionado por Giuliano em 27/01/26
+-- Nao permite vincular NF emitidas antes de 01/01/26 nos itens com saida de ST da CAT28
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       14 CODCRITICA,
+       'ST - Não é permitido emitir o item '||A.SEQPRODUTO||' com nota referenciada/emissão antes de 01/01/2026.' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MLF_NOTAFISCAL X ON X.SEQNF = A.SEQNFREF
+                          INNER JOIN NAGT_BASE_PRODST_FULL C ON C.SEQPRODUTO = A.SEQPRODUTO
+ WHERE 1=1
+   AND X.DTAEMISSAO <= DATE '2026-01-01'
+   AND A.NROEMPRESA NOT IN (36,53)
+
+-- Adicionado por Giuliano em 27/01/26
+-- Nao permite vincular NF emitidas antes de 01/01/26 nos itens com saida de ST da CAT28
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       15 CODCRITICA,
+       'ST - Não é permitido emitir o item '||A.SEQPRODUTO||' com nota referenciada/emissão antes de 01/04/2026.' MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+                          INNER JOIN ETLV_CATEGORIA_V2 C ON C.SEQFAMILIA = P.SEQFAMILIA
+ WHERE 1=1
+   AND TRUNC(SYSDATE) >= DATE '2026-04-01'
+   AND C.CATEGORIAN1 = 'HIGIENE E PERFUMARIA'
+   AND A.NROEMPRESA NOT IN (36,53)
+
+   -- Adicionado por Giuliano em 11/03/26
+   -- Nao permite emitir item referenciado pelo botao AVARIA
+
+UNION ALL
+SELECT A.IDSESSION,
+       A.INST_ID,
+       A.SEQNFDEVFORNEC,
+       A.SEQPRODUTO,
+       16 CODCRITICA,
+       'Nao é permitido inserir itens pelo botão "AVARIA". Referencia uma NF pelo F6 - Item: '||A.SEQPRODUTO MENSAGEM,
+       'B' INDBLOQUEIOLIBERA
+  FROM MFLX_NFDEVFORNEC A INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.SEQPRODUTO
+ WHERE 1=1
+   AND A.IDNFREFAVARIA IS NOT NULL
+;
