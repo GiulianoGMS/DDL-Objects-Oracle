@@ -18,9 +18,11 @@ IS
     
     vlSeloNro         NUMBER(1);
 
+    vlCountBalcao     NUMBER(10);
+    
 BEGIN  
    
-    SELECT DECODE(psOperacao, 'Ajuste', 'A', 'Estorno de Ajuste', 'E')
+    SELECT DECODE(psOperacao, 'Ajuste', 'A', 'Estorno de Ajuste', 'E', 'Selo do Balcao', 'B')
       INTO psDecodeOperacao
       FROM DUAL;
 
@@ -129,6 +131,21 @@ BEGIN
 
         END IF;
 
+    ELSIF psDecodeOperacao = 'B' THEN
+      
+    SELECT COUNT(1) 
+      INTO vlCountBalcao
+      FROM NAGT_CONTROLE_SELOS_PDV_v2 X
+     WHERE X.NROEMPRESA = psNroEmpresa
+       AND X.NROCHECKOUT = 999
+       AND X.DTAMOVIMENTO = psDataMovto;
+       
+    IF vlCountBalcao = 0 THEN
+      
+    INSERT INTO NAGT_CONTROLE_SELOS_PDV_v2 (Dtaajuste, Usuarioajuste, Nroempresa, Nrocheckout, Seqturno, Selos_Aceitos, Selos_Recusados, Selo_Inicial, Selo_Final, Dtamovimento, Operador, Nome_Operador)
+                                    VALUES (SYSDATE, psUsuarioLogado, TO_NUMBER(psNroEmpresa), 999, 1, (psSeloFinal - psSeloInicial) +1, 0, psSeloInicial, psSeloFinal, psDataMovto, 999, 'Balcao');
+    
+    END IF;
     END IF;
 
 EXCEPTION
