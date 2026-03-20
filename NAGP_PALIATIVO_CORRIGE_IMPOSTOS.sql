@@ -2,6 +2,11 @@ CREATE OR REPLACE PROCEDURE NAGP_PALIATIVO_CORRIGE_IMPOSTOS (psSeqAuxNotaFiscal 
 
   -- Paliativo Giuliano para reforma
   -- e outros 
+  
+  -- Adicionado na PKG_MLF_RECEBIMENTO
+  -- Linha 7513
+  -- NAGP_PALIATIVO_CORRIGE_IMPOSTOS(pnSeqAuxNotaFiscal);
+  --
 
   -- Variaveis 
 
@@ -53,7 +58,7 @@ BEGIN
    FROM MLF_AUXNOTAFISCAL X INNER JOIN GE_PESSOA G ON G.SEQPESSOA = X.SEQPESSOA
                             INNER JOIN MAX_CODGERALOPER C ON C.CODGERALOPER = X.CODGERALOPER
                             INNER JOIN MAX_EMPRESA M ON M.NROEMPRESA = X.NROEMPRESA
-  WHERE X.SEQAUXNOTAFISCAL = psSeqAuxNotaFiscal;
+  WHERE X.SEQAUXNOTAFISCAL = psSeqAuxNotaFiscal AND X.SEQPESSOA NOT IN (504) ;
    
   -- Valida se a NT 2025002 esta ativa para o seq
   SELECT MAX(STATUS)
@@ -72,7 +77,7 @@ BEGIN
   -- ou se o fornec nao enviou no XML e ainda nao passou da data de obrigatoriedade
   
   IF psSeqPessoa < 999 AND NVL(psStatusNT,'N') != 'A'
-  OR (NVL(psCBS,0) = 0 OR NVL(psIBS,0) = 0) AND TRUNC(SYSDATE) < DATE '2026-02-01' AND NVL(psIndImp, 'N') != 'I' THEN
+  OR (NVL(psCBS,0) = 0 OR NVL(psIBS,0) = 0) AND TRUNC(SYSDATE) < DATE '2026-04-01' AND NVL(psIndImp, 'N') != 'I' THEN
   
   -- Zera itens
   UPDATE MLF_AUXNFITEM XI SET XI.VLRBASECBS         = 0,
@@ -125,7 +130,7 @@ BEGIN
         SUM(BASECBSCHEIO)   BASECBSCHEIO,
         SUM(VLRCBSCHEIO)    VLRCBSCHEIO,
         
-        COD, EMB_XML
+        COD, EMB_XML, PESOLIQUIDO, DESCCOMPLETA
    
    FROM (
        
@@ -144,27 +149,28 @@ BEGIN
                          Y.M014_VL_VLRBASECBS       BaseCBSCheio,
                          Y.M014_VL_VLRIMPOSTOCBS    VlrCBSCheio,
                          
-                         CASE WHEN psTipDoc IN ('C','B','O') AND pdTipPed IN ('C','E') THEN TO_CHAR(NVL(C.SEQPRODUTO, C2.SEQPRODUTO)) ELSE Y.M014_CD_PRODUTO END COD, Y.M014_DS_UNID_COM EMB_XML
+                         CASE WHEN psTipDoc IN ('C','B','O') AND pdTipPed IN ('C','E') THEN TO_CHAR(NVL(C.SEQPRODUTO, C2.SEQPRODUTO)) ELSE Y.M014_CD_PRODUTO END COD, Y.M014_DS_UNID_COM EMB_XML, E.PESOLIQUIDO, P.DESCCOMPLETA
        
     FROM TMP_M000_NF X INNER JOIN TMP_M014_ITEM Y ON X.M000_ID_NF = Y.M000_ID_NF
                         LEFT JOIN MAP_PRODCODIGO C ON UPPER(C.CODACESSO)  = UPPER(Y.M014_CD_PRODUTO) AND psCNPJ LIKE '%'||C.CGCFORNEC||'%' AND C.TIPCODIGO = 'F'
                         LEFT JOIN MAP_PRODCODIGO C2 ON C2.CODACESSO = Y.M014_CD_EAN    AND C2.TIPCODIGO IN ('E', 'D') --AND psCNPJ LIKE '%'||C2.CGCFORNEC||'%' AND C2.TIPCODIGO = 'E'
                         LEFT JOIN MAP_PRODUTO P ON P.SEQPRODUTO = NVL(C.SEQPRODUTO, C2.SEQPRODUTO)
                         LEFT JOIN MAP_FAMILIA F ON F.SEQFAMILIA = P.SEQFAMILIA
+                        LEFT JOIN MAP_FAMEMBALAGEM E ON E.SEQFAMILIA = F.SEQFAMILIA AND E.QTDEMBALAGEM = 1
                        
-   WHERE X.M000_NR_CHAVE_ACESSO = psChave) GROUP BY COD, EMB_XML)
+   WHERE X.M000_NR_CHAVE_ACESSO = psChave) GROUP BY COD, EMB_XML, PESOLIQUIDO, DESCCOMPLETA)
    
   LOOP
     
     -- Descobre se vai usar o valor rateado ou cheio
     SELECT COUNT(*) QTD_REPETICOES_PROD INTO psQtdRep FROM MLF_AUXNFITEM XI WHERE XI.SEQAUXNOTAFISCAL = psSeqAuxNotaFiscal AND XI.SEQPRODUTO = item.COD;
  
-  UPDATE MLF_AUXNFITEM XI SET XI.VLRBASECBS       = CASE WHEN psQtdRep > 1 THEN item.BaseCBS    * (XI.QUANTIDADE/CASE WHEN item.EMB_XML IN('UN','CR') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.BaseCBSCheio    END,
-                              XI.VLRIMPOSTOCBS    = CASE WHEN psQtdRep > 1 THEN item.VlrCBS     * (XI.QUANTIDADE/CASE WHEN item.EMB_XML IN('UN','CR') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.VlrCBSCheio     END,
-                              XI.VLRBASEIBSUF     = CASE WHEN psQtdRep > 1 THEN item.BaseIBS    * (XI.QUANTIDADE/CASE WHEN item.EMB_XML IN('UN','CR') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.BaseIBSUFCheio  END,
-                              XI.VLRIMPOSTOIBSUF  = CASE WHEN psQtdRep > 1 THEN item.VlrIBS     * (XI.QUANTIDADE/CASE WHEN item.EMB_XML IN('UN','CR') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.VlrIBSUFCheio   END,
-                              XI.VLRBASEIBSMUN    = CASE WHEN psQtdRep > 1 THEN item.BaseIBSMun * (XI.QUANTIDADE/CASE WHEN item.EMB_XML IN('UN','CR') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.BaseIBSMunCHeio END,
-                              XI.VLRIMPOSTOIBSMUN = CASE WHEN psQtdRep > 1 THEN item.VlrIBSMun  * (XI.QUANTIDADE/CASE WHEN item.EMB_XML IN('UN','CR') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.VlrIBSMunCheio  END
+  UPDATE MLF_AUXNFITEM XI SET XI.VLRBASECBS       = CASE WHEN psQtdRep > 1 THEN item.BaseCBS    * ((XI.QUANTIDADE * CASE WHEN item.EMB_XML = 'KG' AND NVL(XI.EMBALAGEM, CASE WHEN item.DESCCOMPLETA LIKE '%KG%' THEN 'KG' ELSE 'X' END) != item.EMB_XML THEN item.PESOLIQUIDO ELSE 1 END) / CASE WHEN item.EMB_XML IN('UN','CR','UN1','KG','CP') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.BaseCBSCheio    END,
+                              XI.VLRIMPOSTOCBS    = CASE WHEN psQtdRep > 1 THEN item.VlrCBS     * ((XI.QUANTIDADE * CASE WHEN item.EMB_XML = 'KG' AND NVL(XI.EMBALAGEM, CASE WHEN item.DESCCOMPLETA LIKE '%KG%' THEN 'KG' ELSE 'X' END) != item.EMB_XML THEN item.PESOLIQUIDO ELSE 1 END) / CASE WHEN item.EMB_XML IN('UN','CR','UN1','KG','CP') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.VlrCBSCheio     END,
+                              XI.VLRBASEIBSUF     = CASE WHEN psQtdRep > 1 THEN item.BaseIBS    * ((XI.QUANTIDADE * CASE WHEN item.EMB_XML = 'KG' AND NVL(XI.EMBALAGEM, CASE WHEN item.DESCCOMPLETA LIKE '%KG%' THEN 'KG' ELSE 'X' END) != item.EMB_XML THEN item.PESOLIQUIDO ELSE 1 END) / CASE WHEN item.EMB_XML IN('UN','CR','UN1','KG','CP') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.BaseIBSUFCheio  END,
+                              XI.VLRIMPOSTOIBSUF  = CASE WHEN psQtdRep > 1 THEN item.VlrIBS     * ((XI.QUANTIDADE * CASE WHEN item.EMB_XML = 'KG' AND NVL(XI.EMBALAGEM, CASE WHEN item.DESCCOMPLETA LIKE '%KG%' THEN 'KG' ELSE 'X' END) != item.EMB_XML THEN item.PESOLIQUIDO ELSE 1 END) / CASE WHEN item.EMB_XML IN('UN','CR','UN1','KG','CP') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.VlrIBSUFCheio   END,
+                              XI.VLRBASEIBSMUN    = CASE WHEN psQtdRep > 1 THEN item.BaseIBSMun * ((XI.QUANTIDADE * CASE WHEN item.EMB_XML = 'KG' AND NVL(XI.EMBALAGEM, CASE WHEN item.DESCCOMPLETA LIKE '%KG%' THEN 'KG' ELSE 'X' END) != item.EMB_XML THEN item.PESOLIQUIDO ELSE 1 END) / CASE WHEN item.EMB_XML IN('UN','CR','UN1','KG','CP') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.BaseIBSMunCHeio END,
+                              XI.VLRIMPOSTOIBSMUN = CASE WHEN psQtdRep > 1 THEN item.VlrIBSMun  * ((XI.QUANTIDADE * CASE WHEN item.EMB_XML = 'KG' AND NVL(XI.EMBALAGEM, CASE WHEN item.DESCCOMPLETA LIKE '%KG%' THEN 'KG' ELSE 'X' END) != item.EMB_XML THEN item.PESOLIQUIDO ELSE 1 END) / CASE WHEN item.EMB_XML IN('UN','CR','UN1','KG','CP') THEN 1 ELSE XI.QTDEMBALAGEM END) ELSE item.VlrIBSMunCheio  END
                               
                         WHERE XI.SEQAUXNOTAFISCAL = psSeqAuxNotaFiscal
                           AND XI.SEQPRODUTO   = item.COD;
@@ -252,6 +258,39 @@ BEGIN
   
   
   COMMIT;
+  
+  -- Paliativo 4 30/01/2025
+  -- Corrige ICMS Desonerado na entrada da devolucao, pois a alteracao do CGO recalcula ep ega a atual
+  
+  IF psCGO IN (103,18,55) AND TRUNC(SYSDATE) < DATE '2026-04-01' THEN
+      UPDATE MLF_AUXNFITEM XI SET INDCALCICMSDESONOUTROS = 0, VLRTOTICMSDESONERADO = 0, MOTIVODESONERACAOICMS = NULL
+                            WHERE XI.SEQAUXNOTAFISCAL = psSeqAuxNotafiscal;
+  COMMIT;
+  END IF;
+  
+  -- Paliativo 5 20/03/2026 TKT 702383
+  -- Zera ICMS Desonerado nas entradas de devolucoes
+  
+  IF psTipDoc = 'D' AND psSeqPessoa < 999 THEN
+    
+  pdCGO := NULL;
+  SP_BUSCAPARAMDINAMICO('NAGUMO',0,'DEV_CGO_ZERA_DESON','S', NULL,
+                        'Lista de CGOs que zera o imposto de ICMS Desonerado na entrada de devolucoes do grupo', pdCGO); 
+                        
+  SELECT MAX(COLUMN_VALUE)
+      INTO psCGORegra
+      FROM TABLE(CAST(C5_COMPLEXIN.C5INTABLE(NVL(TRIM(pdCGO), 0)) AS C5INSTRTABLE))
+     WHERE COLUMN_VALUE = psCGO AND COLUMN_VALUE IS NOT NULL;
+ 
+  IF psCGORegra IS NOT NULL OR 1=1 THEN -- Encontrou CGO no parametro dinamico (se o fiscal quiser)
+    
+     UPDATE MLF_AUXNFITEM XI SET XI.MOTIVODESONERACAOICMS = NULL,
+                                 XI.VLRTOTICMSDESONERADO = 0
+                           WHERE XI.SEQAUXNOTAFISCAL = psSeqAuxNotafiscal;
+                           
+  COMMIT;
+  END IF;
+  END IF;
   
  EXCEPTION
     WHEN OTHERS THEN
