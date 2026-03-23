@@ -1,6 +1,7 @@
 CREATE OR REPLACE PROCEDURE NAGP_PALIATIVO_CBS_IBS_DEV_RED  IS
 
   -- Paliativo Giuliano para reforma
+  -- Dev nao respeitando reducao no calculo CBS/IBS
   -- Variaveis 
   
   pdCGO          VARCHAR2(4000);
