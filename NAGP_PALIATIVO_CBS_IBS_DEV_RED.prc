@@ -1,7 +1,7 @@
 CREATE OR REPLACE PROCEDURE NAGP_PALIATIVO_CBS_IBS_DEV_RED  IS
 
   -- Paliativo Giuliano para reforma
-  -- Dev nao respeitando reducao no calculo CBS/IBS
+  -- Corrige o calculo de CBS/IBS na dev com reducao
   -- Variaveis 
   
   pdCGO          VARCHAR2(4000);
@@ -15,8 +15,8 @@ BEGIN
      FROM MLF_NOTAFISCAL X INNER JOIN MAX_CODGERALOPER C ON C.CODGERALOPER = X.CODGERALOPER
       AND DTAEMISSAO >= SYSDATE - 7
       AND C.TIPDOCFISCAL = 'D'
-      AND X.STATUSNFE = 5
-      AND NOT EXISTS (SELECT 1 FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = X.SEQNF))       
+      AND X.STATUSNFE IN (5,99)
+      AND NOT EXISTS (SELECT 1 FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = X.SEQNF AND MOT = 'RED'))       
     
   LOOP
     
@@ -30,7 +30,7 @@ BEGIN
  
   IF psCGORegra IS NOT NULL THEN -- Encontrou CGO no parametro dinamico
   
-  INSERT INTO NAGT_PALIAT_DEV VALUES (rej.SEQNF);
+  INSERT INTO NAGT_PALIAT_DEV VALUES (rej.SEQNF, 'RED');
   UPDATE MLF_NFITEM XI
    SET XI.VLRIMPOSTOIBSUF =
          CASE
