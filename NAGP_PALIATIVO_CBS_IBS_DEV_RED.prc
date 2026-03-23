@@ -1,7 +1,6 @@
 CREATE OR REPLACE PROCEDURE NAGP_PALIATIVO_CBS_IBS_DEV_RED  IS
 
   -- Paliativo Giuliano para reforma
-  -- (devolucao com reducao 100% nao estava zerando impostos
   -- Variaveis 
   
   pdCGO          VARCHAR2(4000);
