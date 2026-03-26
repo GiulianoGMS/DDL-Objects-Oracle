@@ -11,6 +11,195 @@ IS
 
     psUsuarioLogado   VARCHAR2(300);
     psDecodeOperacao  VARCHAR2(1);
+    vSQL              CLOB;
+    vSQLa             CLOB;
+    vColunaInicial    VARCHAR2(30);
+    vColunaFinal      VARCHAR2(30);
+    vlSeloNro         NUMBER(1);
+    vlCountBalcao     NUMBER(10);
+    pdMinLimiteDiv    NUMBER(10);
+    vlrErro           VARCHAR2(4000);
+    psSeloFinal_upd   NUMBER(10);
+    -- Variaveis para estorno
+    psSeloInicialEst  NUMBER(10);
+    psSeloFinalEst    NUMBER(10);
+    
+BEGIN  
+   
+    SELECT DECODE(psOperacao, 'Ajuste', 'A', 'Estorno de Ajuste', 'E', 'Selo do Balcao', 'B')
+      INTO psDecodeOperacao
+      FROM DUAL;
+
+    SELECT SYS_CONTEXT('USERENV','CLIENT_IDENTIFIER')
+      INTO psUsuarioLogado
+      FROM DUAL;
+
+    SELECT TO_NUMBER(SUBSTR(psSeloNro,6,1))
+      INTO vlSeloNro
+      FROM DUAL;
+      
+   SP_BUSCAPARAMDINAMICO('NAGUMO',0,'DIV_MIN_CONTROLE_SELO','S', NULL,
+                         'Indica o valor mínimo divergente que permitirá alteração da tabela da campanha de selos pelas lojas', pdMinLimiteDiv);
+
+    /* define as colunas dinamicas */
+    
+    IF vlSeloNro = '1' THEN
+        vColunaInicial := 'SELO_INICIAL';
+        vColunaFinal   := 'SELO_FINAL';
+    ELSE
+        vColunaInicial := 'SELO_INICIAL' || vlSeloNro;
+        vColunaFinal   := 'SELO_FINAL'   || vlSeloNro;
+    END IF;
+
+    -- Tira -1 do selo final
+    
+    psSeloFinal_upd := psSeloFinal -1;
+
+    IF psDecodeOperacao = 'A' THEN
+
+        vSQL := '
+            UPDATE NAGT_CONTROLE_SELOS_PDV_v2 X
+               SET X.'||vColunaInicial||' = :1,
+                   X.'||vColunaFinal||'   = :2,
+                   X.DTAAJUSTE           = SYSDATE,
+                   X.USUARIOAJUSTE       = :3
+             WHERE X.NROEMPRESA   = :4
+               AND X.NROCHECKOUT  = :5
+               AND X.SEQTURNO     = :6
+               AND X.DTAMOVIMENTO = :7
+               AND (X.'||vColunaFinal||' IS NULL AND X.'||vColunaFinal||' IS NULL OR ABS(X.'||NVL(vColunaFinal,0)||' - X.'||NVL(vColunaInicial,0)||') >= '||pdMinLimiteDiv||')';
+
+        EXECUTE IMMEDIATE vSQL
+        USING psSeloInicial,
+              psSeloFinal_upd,
+              psUsuarioLogado,
+              psNroEmpresa,
+              psNroCheckout,
+              psSeqTurno,
+              psDataMovto;
+
+        IF SQL%ROWCOUNT > 0 THEN
+
+            INSERT INTO NAGT_CONTROLE_SELOS_PDV_LOG
+            VALUES (
+                psNroEmpresa,
+                psNroCheckout,
+                psSeqTurno,
+                psDataMovto,
+                psSeloInicial,
+                psSeloFinal_upd,
+                psUsuarioLogado,
+                SYSDATE,
+                psOperacao,
+                psSeloNro
+            );
+
+        END IF;
+
+    ELSIF psDecodeOperacao = 'E' THEN
+      
+        vSQLa := '
+          SELECT MAX('||vColunaInicial||'), MAX('||vColunaFinal||')
+            FROM NAGV_CONTROLE_SELOS_PDV_V2
+           WHERE NROEMPRESA   = :1
+             AND NROCHECKOUT  = :2
+             AND SEQTURNO     = :3
+             AND DTAMOVIMENTO = :4';
+
+      EXECUTE IMMEDIATE vSQLa
+         INTO psSeloInicialEst, psSeloFinalEst
+         USING psNroEmpresa, psNroCheckout, psSeqTurno, psDataMovto;
+         
+        vSQL := '
+                UPDATE NAGT_CONTROLE_SELOS_PDV_v2 X
+                   SET X.'||vColunaInicial||' = :1,
+                       X.'||vColunaFinal||'   = :2
+                 WHERE X.NROEMPRESA   = :3
+                   AND X.NROCHECKOUT  = :4
+                   AND X.SEQTURNO     = :5
+                   AND X.DTAMOVIMENTO = :6
+                   AND X.USUARIOAJUSTE IS NOT NULL
+                   AND EXISTS (
+                        SELECT 1
+                          FROM NAGT_CONTROLE_SELOS_PDV_LOG L
+                         WHERE L.NROEMPRESA   = X.NROEMPRESA
+                           AND L.NROCHECKOUT  = X.NROCHECKOUT
+                           AND L.SEQTURNO     = X.SEQTURNO
+                           AND L.DTAMOVIMENTO = X.DTAMOVIMENTO
+                           AND L.SELO_NRO     = :7
+                   )';
+        DBMS_OUTPUT.PUT_LINE(vSQL);
+        EXECUTE IMMEDIATE vSQL
+                    USING psSeloInicialEst,
+                          psSeloFinalEst,
+                          psNroEmpresa,
+                          psNroCheckout,
+                          psSeqTurno,
+                          psDataMovto,
+                          psSeloNro;
+
+        IF SQL%ROWCOUNT > 0 THEN
+
+            INSERT INTO NAGT_CONTROLE_SELOS_PDV_LOG
+            VALUES (
+                psNroEmpresa,
+                psNroCheckout,
+                psSeqTurno,
+                psDataMovto,
+                NULL,
+                NULL,
+                psUsuarioLogado,
+                SYSDATE,
+                psOperacao,
+                psSeloNro
+            );
+
+        END IF;
+
+    ELSIF psDecodeOperacao = 'B' THEN
+      
+    SELECT COUNT(1) 
+      INTO vlCountBalcao
+      FROM NAGT_CONTROLE_SELOS_PDV_v2 X
+     WHERE X.NROEMPRESA = TO_NUMBER(psNroEmpresa)
+       AND X.NROCHECKOUT = 999
+       AND X.DTAMOVIMENTO = psDataMovto;
+       
+    IF vlCountBalcao = 0 THEN
+      
+    INSERT INTO NAGT_CONTROLE_SELOS_PDV_v2 (Dtaajuste, Usuarioajuste, Nroempresa, Nrocheckout, Seqturno, Selos_Aceitos, Selos_Recusados, Selo_Inicial, Selo_Final, Dtamovimento, Operador, Nome_Operador)
+                                    VALUES (SYSDATE, psUsuarioLogado, TO_NUMBER(psNroEmpresa), 999, 1, (psSeloFinal_upd - psSeloInicial) +1, 0, psSeloInicial, psSeloFinal_upd, psDataMovto, 999, 'Balcao');
+    
+    END IF;
+    END IF;
+
+EXCEPTION
+   
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error Code: ' || SQLCODE);
+        DBMS_OUTPUT.PUT_LINE('Error Message: ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Error Stack: ' || DBMS_UTILITY.FORMAT_ERROR_STACK);
+        DBMS_OUTPUT.PUT_LINE('Error Backtrace: ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+        DBMS_OUTPUT.PUT_LINE('Call Stack: ' || DBMS_UTILITY.FORMAT_CALL_STACK);
+       vlrErro := SQLERRM;
+        INSERT INTO NAGT_LOG_ERROS_SELOPDV VALUES (SYSDATE, vlrErro||'>>> '||psNroEmpresa);
+        COMMIT;
+       -- DBMS_OUTPUT.PUT_LINE(SQLERRM);
+
+END;
+CREATE OR REPLACE PROCEDURE NAGP_UPD_CONTROLE_SELOS_PDV (psNroEmpresa  VARCHAR2,
+                                                         psNroCheckout NUMBER,
+                                                         psSeqTurno    NUMBER,
+                                                         psDataMovto   DATE,
+                                                         psSeloInicial NUMBER,
+                                                         psSeloFinal   NUMBER,
+                                                         psOperacao    VARCHAR2,
+                                                         psSeloNro     VARCHAR2
+)
+IS
+
+    psUsuarioLogado   VARCHAR2(300);
+    psDecodeOperacao  VARCHAR2(1);
 
     vSQL              CLOB;
     vColunaInicial    VARCHAR2(30);
