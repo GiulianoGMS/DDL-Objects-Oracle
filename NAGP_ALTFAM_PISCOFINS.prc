@@ -8,13 +8,16 @@ CREATE OR REPLACE PROCEDURE NAGP_ALTFAM_PISCOFINS (psAliquota NUMBER) AS
   i INTEGER := 0;
 
 BEGIN
+   
   FOR t IN (SELECT A.SEQFAMILIA FROM NAGT_PRODST_ABRIL A /* << Tabela com os SeqFamilias a serem alterados */ INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = A.SEQFAMILIA) 
     LOOP
     i := i+1;
-     UPDATE MAP_FAMDIVISAO F SET F.PERDESPESADIVISAO = NVL(F.PERDESPESADIVISAO,0) + psAliquota,
+     UPDATE MAP_FAMDIVISAO F SET F.PERDESPESADIVISAO = NVL(F.PERDESPESADIVISAO,0) + (psAliquota * CASE WHEN psAjuste = 'A' THEN 1 ELSE -1 END), -- Outro valor no psAjuste estorna o lancamento
                                  F.USUARIOALTERACAO  = 'PISCOFINS',
                                  F.DTAHORALTERACAO   = SYSDATE
-                     WHERE F.SEQFAMILIA = T.SEQFAMILIA; 
+                     WHERE F.SEQFAMILIA = T.SEQFAMILIA
+                       AND (psAjuste = 'A'
+                        OR (psAjuste != 'A' AND NVL(F.PERDESPESADIVISAO,0) >= psAliquota));
     
     IF i  = 100 THEN COMMIT;
        i := 0;
@@ -23,4 +26,5 @@ BEGIN
     COMMIT;
     END LOOP;
     
+END;
 END;
