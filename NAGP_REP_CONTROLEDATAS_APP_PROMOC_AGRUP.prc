@@ -1,0 +1,220 @@
+CREATE OR REPLACE PROCEDURE NAGP_REP_CONTROLEDATAS_APP_PROMOC_AGRUP (pdData DATE, pdNroEmpresa NUMBER DEFAULT NULL) IS
+
+-- Criado por Giuliano em 11/02/2026
+-- Replica os dados do banco DW do app para o ERP
+-- Inicialmente, Frios e Laticinios nao poderao ser replicados pela NAGP_REP_CONTROLEDATAS_APP pois nao pode colar etiqueta rosa
+-- Necessario gerar promocao normal no ERP
+-- Versao Agrupada
+
+  psSeqPromocNextVal MRL_PROMOCAO.SEQPROMOCAO%TYPE;
+  psContador         NUMBER(10);
+  psSeqPromocDia     MRL_PROMOCAO.SEQPROMOCAO%TYPE;
+  psSeqPromocao      MRL_PROMOCAO.SEQPROMOCAO%TYPE;
+  --pdData             DATE;
+
+BEGIN
+
+  -- Controle do insert     
+
+  SELECT COUNT(1), MAX(SEQPROMOCAO)
+    INTO psContador, psSeqPromocDia
+    FROM NAGV_APP_DATAVALIDADE_CONTROLE@CONSINCODW X 
+   WHERE DATA_ATIVIDADE = pdData
+     AND LOJA = NVL(pdNroEmpresa, LOJA)
+     AND PROD_INSERIDO = 'N' -- Controle 
+     AND IND_INSERE_PROMO = 'S'; -- Insere apenas categoria indicada na view
+  
+  IF psContador > 0 THEN
+    
+    -- Controle do SeqPromocao
+    IF psSeqPromocDia IS NULL THEN
+    -- Pega o seq da capa para insercao
+    SELECT S_SEQPROMOCAO.NEXTVAL
+      INTO psSeqPromocNextVal
+      FROM DUAL;
+    -- Se nao tinha promocao que ja criou no dia, usa o next val
+         psSeqPromocao := psSeqPromocNextVal;
+    ELSE psSeqPromocao := psSeqPromocDia; -- Se ja criou promoc no dia, insere o item na mesma seqpromocao
+    END IF;
+    
+    -- ver o seq
+    DBMS_OUTPUT.PUT_LINE(psSeqPromocao);
+    
+  -- Insert da Capa
+  -- Vai criar a capa para todas as lojas com o seqpromocao encontrado anteriormente
+  
+  INSERT INTO MRL_PROMOCAO X 
+    
+    SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/
+       psSeqPromocao SEQPROMOCAO,
+       M.NROEMPRESA, 'M' CENTRALLOJA, M.NROSEGMENTOPRINC NROSEGMENTO, 
+      'CDV LJ'||LPAD(M.NROEMPRESA,2,0)||' '||'De '||TO_CHAR(MIN(A.DATA_ATIVIDADE) + 1, 'DD/MM/YY')||' Ate '||TO_CHAR(MAX(A.DATA_VALIDADE) - 1, 'DD/MM/YY') PROMOCAO,
+      'N' TIPOPROMOC, MIN(A.DATA_ATIVIDADE + 1) DTAINICIO, MAX(DATA_VALIDADE -1) DTAFIM, 'T' TIPOEMBPROMOCAO,
+      'S' INDREPLICACAO, NULL INDGEROUREPLICACAO, 'A' FAIXAACRFINANCEIRO, 'S' INDPREVALECEPRECO, 'N' INDREPRESENTANTE, 1 NRODIVISAO, 'V' TIPODIGITACAOPROMOC, 10 SEQGRUPOPROMOC,
+      'S' INDUSAACRESCTABVENDA, NULL DTAGERACAOPROMOC, 'N' INDUSAPRECOFIXO, 'P' TIPOMEDIAVDA, NULL INDSEGMENTOPRINC, 'N' INDALTERASIMILAR, 'N' INDALTERADERIVADO, 'P' INDTIPOPRECIFICACAO,
+       NULL SEQENCARTE, NULL INATIVAPROMOCAOCCACORD, 'N' INDALTERAASSOCIADO, 'APP_GEST' USUINCLUSAO, SYSDATE DTAHORAINCLUSAO, 'APP_GEST' USUALTERACAO, SYSDATE DTAHORAALTERACAO,
+      'N' INDPERMVERBASEMACORDO, 601 NROEMPLOGADA, 'N' INDSEGTOPRECO, NULL CODPARCEIRO, NULL IDCENARIOPRICING, 'N' INDDESCONSIDERAPROMOCAO, 0 NROBASEEXPORTACAOERP
+
+     FROM NAGV_APP_DATAVALIDADE_CONTROLE@CONSINCODW A INNER JOIN MAX_EMPRESA M ON M.NROEMPRESA = A.LOJA
+    WHERE 1=1
+      AND DATA_ATIVIDADE   = pdData
+      AND IND_INSERE_PROMO = 'S'
+      AND PROD_INSERIDO    = 'N'
+      AND LOJA = NVL(pdNroEmpresa, LOJA)
+      GROUP BY M.NROEMPRESA, M.NROSEGMENTOPRINC;
+         
+  -- Insert dos Itens por loja
+  
+  FOR promoc IN (
+    
+    SELECT DISTINCT psSeqPromocao SEQPROMOCAO,
+    -- Este bloco repete da capa pois tbm é utilizado parte nos itens
+       M.NROEMPRESA, 'M' CENTRALLOJA, M.NROSEGMENTOPRINC NROSEGMENTO,
+      'CDV LJ'||LPAD(M.NROEMPRESA,2,0)||' '||'De '||TO_CHAR(A.DATA_ATIVIDADE + 1, 'DD/MM/YY')||' Ate '||TO_CHAR(A.DATA_VALIDADE - 1, 'DD/MM/YY') PROMOCAO,
+      'N' TIPOPROMOC, A.DATA_ATIVIDADE + 1 DTAINICIO, DATA_VALIDADE -1 DTAFIM, 'T' TIPOEMBPROMOCAO,
+      'S' INDREPLICACAO, NULL INDGEROUREPLICACAO, 'A' FAIXAACRFINANCEIRO, 'S' INDPREVALECEPRECO, 'N' INDREPRESENTANTE, 1 NRODIVISAO, 'V' TIPODIGITACAOPROMOC, 10 SEQGRUPOPROMOC,
+      'S' INDUSAACRESCTABVENDA, NULL DTAGERACAOPROMOC, 'N' INDUSAPRECOFIXO, 'P' TIPOMEDIAVDA, NULL INDSEGMENTOPRINC, 'N' INDALTERASIMILAR, 'N' INDALTERADERIVADO, 'P' INDTIPOPRECIFICACAO,
+      NULL SEQENCARTE, NULL INATIVAPROMOCAOCCACORD, 'N' INDALTERAASSOCIADO, 'APP_GEST' USUINCLUSAO, SYSDATE DTAHORAINCLUSAO, 'APP_GEST' USUALTERACAO, SYSDATE DTAHORAALTERACAO,
+      'N' INDPERMVERBASEMACORDO, 601 NROEMPLOGADA, 'N' INDSEGTOPRECO, NULL CODPARCEIRO, NULL IDCENARIOPRICING, 'N' INDDESCONSIDERAPROMOCAO, 0 NROBASEEXPORTACAOERP,
+    -- Itens
+       A.PLU SEQPRODUTO, S.QTDEMBALAGEM, NULL VDAMAXCUPOM, NULL QTDPREVISTAVDA, NULL ESTQMINIMOLOJA, NULL ESTQMAXIMOLOJA, NULL ESTQADICIONALDEP,
+       ROUND(
+       TRUNC(
+            E.CMULTCUSLIQUIDOEMP
+            /
+            (
+              1
+              -
+              (
+                (
+                  S.PRECOVALIDNORMAL
+                  - E.CMULTCUSLIQUIDOEMP
+                  - ((Y.MGMPRECOVALIDO/100) * S.PRECOVALIDNORMAL)
+                )
+                / S.PRECOVALIDNORMAL
+              )
+              - 0.10 -- Mantem 10% de Margem - Solic Matheus
+            )
+       ,1)
+       + 0.08
+       ,2) PRECOPROMOCIONAL,
+       --ROUND(TRUNC(S.PRECOVALIDNORMAL * 0.9, 1) + 0.09, 2) PRECOPROMOCIONAL, -- Tira 10% e arredonda final para 9 (xx.x9)
+       -- Se o preco calculado da oferta for maior que o preco atual da loja, sobe como inativo
+       CASE WHEN ROUND(
+       TRUNC(
+            E.CMULTCUSLIQUIDOEMP
+            /
+            (
+              1
+              -
+              (
+                (
+                  S.PRECOVALIDNORMAL
+                  - E.CMULTCUSLIQUIDOEMP
+                  - ((Y.MGMPRECOVALIDO/100) * S.PRECOVALIDNORMAL)
+                )
+                / S.PRECOVALIDNORMAL
+              )
+              - 0.10 -- Mantem 10% de Margem - Solic Matheus
+            )
+       ,1)
+       + 0.08
+       ,2) > NVL(NULLIF(S.PRECOVALIDPROMOC,0), S.PRECOVALIDNORMAL) THEN 'I' ELSE 'A' END STATUS, 
+       --
+      'APP_GEST' USUARIO, TRUNC(SYSDATE) DTAINCLUSAO,  NULL DTAGERACAO, NULL DTASAIDAPROMOCAO, 'ALTERACAO CENTRAL' MOTIVOALTMANUAL, NULL QTDTOTALVDA,
+       A.DATA_ATIVIDADE + 1 DTAINICIOPROM, DATA_VALIDADE -1 DTAFIMPROM, NULL VLRTOTALVDA, NULL PERCDESCPROMOC, NULL QTDLIMITEUSO, NULL QTDRESERVADA,
+       NULL NROACORDO, NULL NROEMPRESAACORDO, 'N' INDUTILCSSEMACORDO, 9 PRECOSUGERIDO, 'N' INDUTILCONTRSALDACORD, NULL SEQCCACORDOASSOC, NULL FLAGUPDATE, NULL INDAUTOMATICO,
+       NULL SEQVERBA, NULL QTDMEDIAVDAPROMOC, NULL SITUACAOCRITICAPRECO, NULL CODCRITICAPRECO,
+       NULL DTALIBERACAOCRITICA, NULL USULIBERACAOCRITICA, NULL OBSCRITICA
+
+  FROM NAGV_APP_DATAVALIDADE_CONTROLE@CONSINCODW A INNER JOIN MAX_EMPRESA M ON M.NROEMPRESA = A.LOJA
+                                            INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = A.PLU
+                                            INNER JOIN MRL_PRODEMPSEG S ON S.SEQPRODUTO = A.PLU AND S.NROEMPRESA = M.NROEMPRESA AND S.NROSEGMENTO = M.NROSEGMENTOPRINC AND S.QTDEMBALAGEM = 1
+                                            INNER JOIN DIM_CATEGORIA@CONSINCODW C ON C.SEQFAMILIA = P.SEQFAMILIA
+                                            INNER JOIN MRL_PRODUTOEMPRESA E ON E.SEQPRODUTO = A.PLU AND E.NROEMPRESA = A.LOJA
+                                            INNER JOIN MAXV_MGMBASEPRODSEG Y ON Y.SEQPRODUTO = A.PLU AND Y.NROEMPRESA = M.NROEMPRESA AND Y.NROSEGMENTO = M.NROSEGMENTOPRINC AND Y.QTDEMBALAGEM = 1
+   WHERE 1=1
+     AND DATA_ATIVIDADE   = pdData
+     AND IND_INSERE_PROMO = 'S'
+     AND PROD_INSERIDO    = 'N'
+     AND LOJA = NVL(pdNroEmpresa, LOJA)
+     -- Nao isnere se ja existe uma promoc de controle no mesmo item x loja x data validade
+     AND NOT EXISTS (SELECT 1 FROM MRL_PROMOCAO AA INNER JOIN MRL_PROMOCAOITEM BB ON AA.SEQPROMOCAO = BB.SEQPROMOCAO
+                             WHERE AA.NROEMPRESA = BB.NROEMPRESA 
+                               AND AA.NROEMPRESA = LOJA
+                               AND BB.SEQPRODUTO = A.PLU
+                               AND A.DATA_VALIDADE - 1 = AA.DTAFIM
+                               AND AA.SEQGRUPOPROMOC = 10)
+     
+    )
+    
+    LOOP
+       
+    INSERT INTO MRL_PROMOCAOITEM XI VALUES (
+       promoc.SEQPRODUTO,
+       promoc.QTDEMBALAGEM,
+       promoc.SEQPROMOCAO,
+       promoc.NROEMPRESA,
+       promoc.NROSEGMENTO,
+       promoc.CENTRALLOJA,
+       promoc.VDAMAXCUPOM,
+       promoc.QTDPREVISTAVDA,
+       promoc.ESTQMINIMOLOJA,
+       promoc.ESTQMAXIMOLOJA,
+       promoc.ESTQADICIONALDEP,
+       promoc.PRECOPROMOCIONAL,
+       promoc.STATUS,
+       promoc.INDREPLICACAO,
+       promoc.INDGEROUREPLICACAO,
+       promoc.USUARIO,
+       promoc.DTAINCLUSAO,
+       promoc.DTAGERACAO,
+       promoc.DTASAIDAPROMOCAO,
+       promoc.MOTIVOALTMANUAL,
+       promoc.QTDTOTALVDA,
+       promoc.DTAINICIOPROM,
+       promoc.DTAFIMPROM,
+       promoc.VLRTOTALVDA,
+       promoc.PERCDESCPROMOC,
+       promoc.QTDLIMITEUSO,
+       promoc.QTDRESERVADA,
+       promoc.NROACORDO,
+       promoc.NROEMPRESAACORDO,
+       promoc.INDUTILCSSEMACORDO,
+       promoc.PRECOSUGERIDO,
+       promoc.INDUTILCONTRSALDACORD,
+       promoc.SEQCCACORDOASSOC,
+       promoc.FLAGUPDATE,
+       promoc.INDAUTOMATICO,
+       promoc.USUALTERACAO,
+       promoc.DTAHORAALTERACAO,
+       promoc.SEQVERBA,
+       promoc.QTDMEDIAVDAPROMOC,
+       promoc.SITUACAOCRITICAPRECO,
+       promoc.CODCRITICAPRECO,
+       promoc.DTALIBERACAOCRITICA,
+       promoc.USULIBERACAOCRITICA,
+       promoc.OBSCRITICA,
+       promoc.NROBASEEXPORTACAOERP);
+       
+    IF SQL%ROWCOUNT > 0 THEN
+     
+    INSERT INTO NAGT_CONTROLE_VALIDADE_INS@CONSINCODW (NROEMPRESA, SEQPRODUTO, TIPO, DATA_REG, DATA_ATIV, DATA_VAL, SEQPROMOCAO)
+                                               VALUES (promoc.NROEMPRESA, promoc.SEQPRODUTO, 'P', SYSDATE, promoc.DTAINICIOPROM -1, promoc.DTAFIMPROM +1, promoc.SEQPROMOCAO);
+    END IF;              
+    END LOOP;
+   --COMMIT;
+  END IF;
+  
+  EXCEPTION
+    WHEN OTHERS THEN -- tentando descobrir o krl do erro
+        DBMS_OUTPUT.PUT_LINE('Error Code: ' || SQLCODE);
+        DBMS_OUTPUT.PUT_LINE('Error Message: ' || SQLERRM);
+        DBMS_OUTPUT.PUT_LINE('Error Stack: ' || DBMS_UTILITY.FORMAT_ERROR_STACK);
+        DBMS_OUTPUT.PUT_LINE('Error Backtrace: ' || DBMS_UTILITY.FORMAT_ERROR_BACKTRACE);
+        DBMS_OUTPUT.PUT_LINE('Call Stack: ' || DBMS_UTILITY.FORMAT_CALL_STACK);
+    RAISE;
+ 
+END;
+    
+    
