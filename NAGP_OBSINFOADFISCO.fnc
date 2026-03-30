@@ -1,0 +1,27 @@
+CREATE OR REPLACE FUNCTION NAGP_OBSINFOADFISCO(psSeqNF MLF_NOTAFISCAL.SEQNF%TYPE)
+  RETURN VARCHAR2 IS
+  psQtdItemEnquadrado NUMBER(10);
+  psInfoAdFiscoMsg    VARCHAR2(4000);
+BEGIN
+
+  SELECT COUNT(1)
+    INTO psQtdItemEnquadrado
+    FROM MFLV_BASEDFITEM C
+   INNER JOIN MAP_PRODUTO P
+      ON P.SEQPRODUTO = C.SEQPRODUTO
+   WHERE C.SEQNF = psSeqNF
+     AND EXISTS (SELECT 1
+            FROM NAGT_BASE_ALT_PISCOFINS10 X
+           WHERE X.SEQFAMILIA = P.SEQFAMILIA);
+
+  IF psQtdItemEnquadrado > 0 THEN
+    psInfoAdFiscoMsg := 'Operação Sujeita ao Disposto da Lei Complementar n 224/2025';
+  END IF;
+
+  RETURN psInfoAdFiscoMsg;
+
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN NULL;
+  
+END;
