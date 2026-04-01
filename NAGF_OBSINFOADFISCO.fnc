@@ -3,6 +3,12 @@ CREATE OR REPLACE FUNCTION NAGF_OBSINFOADFISCO (
     psCGO NUMBER
 ) RETURN VARCHAR2 IS
 
+ -- Adicionar a function na SP_EXPNFE_2g
+-- Linha 772
+-- END -- Alt Giuliano LC 224/2025
+--              || NAGF_OBSINFOADFISCO(A.SEQNF, A.codgeraloper)
+--              as M000_DS_INFO_FISCO,
+
     vListaTributacao VARCHAR2(4000);
     vListaCGO        VARCHAR2(4000);
     vExiste          NUMBER;
