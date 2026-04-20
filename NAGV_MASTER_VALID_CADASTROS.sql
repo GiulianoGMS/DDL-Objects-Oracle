@@ -21,7 +21,8 @@ SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/
        CASE WHEN INC17 IS NOT NULL THEN ' | '||INC17 ELSE NULL END||
        CASE WHEN INC18 IS NOT NULL THEN ' | '||INC18 ELSE NULL END||
        CASE WHEN INC19 IS NOT NULL THEN ' | '||INC19 ELSE NULL END||
-       CASE WHEN INC20 IS NOT NULL THEN ' | '||INC20 ELSE NULL END
+       CASE WHEN INC20 IS NOT NULL THEN ' | '||INC20 ELSE NULL END||
+       CASE WHEN INC21 IS NOT NULL THEN ' | '||INC21 ELSE NULL END
        INCONSISTENCIAS
   FROM (
 
@@ -240,24 +241,40 @@ SELECT SEQPRODUTO, MP.SEQFAMILIA, DESCCOMPLETA,
 
             WHERE (UPPER(C.TRIBUTACAO) NOT LIKE '%IM%' AND CODORIGEMTRIB IN (0,4,5,6)
               AND T.PERALIQUOTA = 4 AND PERALIQUOTA != 0)
-              AND B.SEQFAMILIA = MP.SEQFAMILIA)
+              AND B.SEQFAMILIA = MP.SEQFAMILIA
+              AND B.NROTRIBUTACAO NOT IN (1,1187))
           THEN 'Prod Trib. NAC com Aliquota igual à 4!' END INC19,
           CASE WHEN EXISTS (
-          SELECT 1 FROM MAP_TRIBUTACAOUF T WHERE T.NROTRIBUTACAO = FD.NROTRIBUTACAO AND RPAD(T.SITUACAONF,3,0) IN ('020','030','040','041','050','070') 
-                                                                                    AND UFEMPRESA IN ('SP','RJ') 
-                                                                                    AND UFCLIENTEFORNEC = UFEMPRESA 
+          SELECT 1 FROM MAP_TRIBUTACAOUF T WHERE T.NROTRIBUTACAO = FD.NROTRIBUTACAO AND RPAD(T.SITUACAONF,3,0) IN ('020','030','040','041','050','070')
+                                                                                    AND UFEMPRESA IN ('SP','RJ')
+                                                                                    AND UFCLIENTEFORNEC = UFEMPRESA
                                                                                     AND T.TIPTRIBUTACAO = 'SC'
                                                                                     AND T.NROREGTRIBUTACAO = 0
                  AND (NVL(T.INDCALCICMSDESONOUTROS, 'N') = 'N'
                    OR T.CODAJUSTEINFAD IS NULL
                    OR T.MOTIVODESONERACAO IS NULL)
+                   AND FD.NROTRIBUTACAO NOT IN (1,1187)
             )
-          THEN 'Familia/Trib sem cBenef parametrizado - Trib: '||FD.NROTRIBUTACAO END INC20
+          THEN 'Familia/Trib sem cBenef parametrizado - Trib: '||FD.NROTRIBUTACAO END INC20,
+       -- 715679   
+       CASE WHEN EXISTS (
+                          SELECT 1
+                            FROM MAP_TRIBUTACAOUF X
+                           WHERE X.UFCLIENTEFORNEC = X.UFEMPRESA
+                             AND UFEMPRESA = 'RJ'
+                             AND X.SITUACAONF = '020'
+                             AND X.NROREGTRIBUTACAO = 0
+                             AND X.TIPTRIBUTACAO = 'SN'
+                             AND X.PERTRIBUTADO != 100
+                             AND X.BASEFCPICMS != X.PERTRIBUTADO
+                             AND X.NROTRIBUTACAO = FD.NROTRIBUTACAO
+            )
+          THEN 'Perc Base FCP Diferente do Perc Tributado! Trib: '||FD.NROTRIBUTACAO END INC21
 
   FROM MAP_PRODUTO MP INNER JOIN MAP_FAMDIVISAO FD ON FD.SEQFAMILIA = MP.SEQFAMILIA
  WHERE FD.FINALIDADEFAMILIA NOT IN ('P') -- Solicitado Dani em 27/01/25 -- Remover MP
 
   ) vMaster WHERE COALESCE(INC1,  INC2,  INC3,  INC4,  INC5,  INC6,
                            INC7,  INC8,  INC9,  INC10, INC11, INC12,
-                           INC13, INC14, INC15, INC16, INC17, INC18, INC19, INC20) IS NOT NULL
+                           INC13, INC14, INC15, INC16, INC17, INC18, INC19, INC20, INC21) IS NOT NULL
 ;
