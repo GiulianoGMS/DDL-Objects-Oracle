@@ -18,7 +18,7 @@ BEGIN
 
   FOR nf IN (SELECT SEQNF, F.SEQNOTAFISCAL
                FROM MFL_DOCTOFISCAL F
-              WHERE F.DTAMOVIMENTO >= TRUNC(SYSDATE)
+              WHERE F.DTAMOVIMENTO >= TRUNC(SYSDATE) - 7
                 AND F.STATUSNFE = 5 -- Busca as rejeitadas
                 AND F.CODGERALOPER IN
                     (SELECT COLUMN_VALUE
@@ -32,7 +32,7 @@ BEGIN
      WHERE XI.SEQNF = nf.SEQNF
        AND NVL(VLRDESCICMS, 0) > 0        -- Somente o que possui desc de icms calculado
        AND NVL(INDMOTIVODESOICMS, 0) = 8  -- Somente Orgao Publico
-       AND XI.SITUACAONF = '000';         -- CST Errado
+       AND XI.SITUACAONF IN ('020','120','220','320','420','620','720','820','000','100','200','300','400','500','600','700','800');         -- CST Errado
   
     COMMIT;
   
@@ -42,6 +42,7 @@ BEGIN
     END IF;
   
   END LOOP;
+  COMMIT;
 
 END;
 
