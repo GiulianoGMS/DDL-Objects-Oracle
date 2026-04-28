@@ -32,12 +32,12 @@ BEGIN
     END IF;
 
     -- Pega dados do Fornecedor
-    SELECT 'giuliano.gomes@nagumo.com.br' --MAX(A.EMAIL)
+    SELECT MAX(A.EMAIL)
       INTO vsEmail
-      FROM DUAL;/* NAGV_TAE_ACORDOS_v4 A
+      FROM NAGV_TAE_ACORDOS_v4 A
      WHERE A.EMAIL = psEmail
        AND A.VENCIMENTO >= TRUNC(SYSDATE)
-       AND STATUS IN ('Aguardando assinatura do envelope','Pendente');*/
+       AND STATUS IN ('Aguardando assinatura do envelope','Pendente');
 
     -- Monta as linhas da tabela
     -- o LOOP vai lupar apenas para agregar os dados!
