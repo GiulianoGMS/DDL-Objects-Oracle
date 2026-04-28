@@ -32,12 +32,12 @@ BEGIN
     END IF;
 
     -- Pega dados do Fornecedor
-    SELECT MAX(A.EMAIL)
+    SELECT 'giuliano.gomes@nagumo.com.br' --MAX(A.EMAIL)
       INTO vsEmail
-      FROM NAGV_TAE_ACORDOS_v4 A
+      FROM DUAL; /*FROM NAGV_TAE_ACORDOS_v4 A
      WHERE A.EMAIL = psEmail
        AND A.VENCIMENTO >= TRUNC(SYSDATE)
-       AND STATUS IN ('Aguardando assinatura do envelope','Pendente');
+       AND STATUS IN ('Aguardando assinatura do envelope','Pendente');*/
 
     -- Monta as linhas da tabela
     -- o LOOP vai lupar apenas para agregar os dados!
@@ -49,7 +49,7 @@ BEGIN
                TO_CHAR(A.VENCIMENTO, 'DD/MM/YYYY') VENCIMENTO,
                TO_CHAR(A.DATA_EMISSAO, 'DD/MM/YYYY') EMISSAO,
                INITCAP(A.TIPO_ACORDO) TIPO_ACORDO, STATUS, SUBSTR(A.FORNECEDOR,0,30)||'..' FORNEC,
-               A.URL_ACO, INITCAP(A.COMPRADOR) COMPRADOR
+               A.URL_ACO, A.NOME_INCLUSAO COMPRADOR, INITCAP(A.TIPO_ACORDO) TIPO_ACO
           FROM NAGV_TAE_ACORDOS_v4 A
          WHERE A.EMAIL = psEmail
            AND A.VENCIMENTO >= TRUNC(SYSDATE)
@@ -80,6 +80,7 @@ BEGIN
             vsTable := vsTable ||
                 '<tr>
                    <td style="padding:10px;border-bottom:1px solid #f3f4f6;">' || t.NRO_ACORDO || '</td>
+                   <td style="padding:10px;border-bottom:1px solid #f3f4f6;">' || t.TIPO_ACO || '</td>
                    <td style="padding:10px;border-bottom:1px solid #f3f4f6;">' || T.EMPRESA || '</td>
                    <td style="padding:10px;border-bottom:1px solid #f3f4f6;">' || t.COMPRADOR || '</td>
                    <td style="padding:10px;border-bottom:1px solid #f3f4f6;">
@@ -145,9 +146,10 @@ BEGIN
                         <table role="presentation" width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse;">
                           <thead>
                             <tr>
+                              <th style="text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Numero Acordo</th>
                               <th style="text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Acordo</th>
                               <th style="text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Empresa</th>
-                              <th style="text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Comprador</th>
+                              <th style="text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Comprador/Assistente</th>
                               <th style="text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Link para Assinatura</th>
                             </tr>
                           </thead>
