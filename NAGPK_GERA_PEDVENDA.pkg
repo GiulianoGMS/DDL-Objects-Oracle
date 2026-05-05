@@ -1,0 +1,167 @@
+CREATE OR REPLACE PACKAGE NAGPKG_GERA_PEDVENDA AS
+
+    PROCEDURE INSERE_PROD_BASE_PEDVENDA (
+        pdNroEmpresa      IN NUMBER,
+        pdQtdLimiteItens IN NUMBER DEFAULT 4000
+    );
+
+    PROCEDURE GERA_PEDVENDA (
+        pdNroEmpresa IN NUMBER,
+        pdCPF        IN VARCHAR2 DEFAULT '00000000191',
+        pdQtdPorPedido IN NUMBER DEFAULT 400
+    );
+
+END NAGPKG_GERA_PEDVENDA;
+
+
+CREATE OR REPLACE PACKAGE BODY NAGPKG_GERA_PEDVENDA AS
+
+PROCEDURE INSERE_PROD_BASE_PEDVENDA (pdNroEmpresa     IN NUMBER,
+                                     pdQtdLimiteItens IN NUMBER DEFAULT 4000) AS
+BEGIN
+  
+ -- Primeiro atualiza tudo que nao for N para 'X', evita pegar coisa indevida no prox pedido
+ UPDATE NAGT_BASE_PRODUTOS_PED SET PROCESSADO = 'X' WHERE PROCESSADO != 'S';
+ COMMIT;
+ 
+ -- Faz o insert dos itens que serao utilizados como base
+ INSERT INTO NAGT_BASE_PRODUTOS_PED
+
+ SELECT * FROM (
+ 
+ SELECT P.SEQPRODUTO, MAX(COD.CODACESSO) AS CODACESSO, 'N' PROCESSADO
+   FROM MAP_PRODUTO P INNER JOIN MAP_FAMILIA F ON F.SEQFAMILIA = P.SEQFAMILIA
+                      INNER JOIN MAP_PRODCODIGO COD ON COD.SEQPRODUTO = P.SEQPRODUTO
+                      INNER JOIN MAP_FAMDIVISAO FD ON FD.SEQFAMILIA = F.SEQFAMILIA
+                      
+  WHERE EXISTS (SELECT 1 FROM MRL_PRODEMPSEG X INNER JOIN MAX_EMPRESA M ON M.NROEMPRESA = X.NROEMPRESA AND X.NROSEGMENTO = M.NROSEGMENTOPRINC
+                 WHERE X.QTDEMBALAGEM = 1 
+                   AND X.PRECOVALIDNORMAL > 0 
+                   AND X.SEQPRODUTO = P.SEQPRODUTO
+                   AND X.STATUSVENDA = 'A' 
+                   AND X.NROEMPRESA = pdNroEmpresa)
+                   
+    AND NVL(F.COMPCESTABASICA, 'N') = 'N'
+    AND COD.TIPCODIGO IN ('E', 'B')
+    AND FD.FINALIDADEFAMILIA = 'R'
+        
+  GROUP BY P.SEQPRODUTO
+  ORDER BY DBMS_RANDOM.VALUE)
+  WHERE ROWNUM <= pdQtdLimiteItens;
+  
+  COMMIT;
+  
+END INSERE_PROD_BASE_PEDVENDA;
+
+PROCEDURE GERA_PEDVENDA (pdNroEmpresa   IN NUMBER,
+                         pdCPF          IN VARCHAR2 DEFAULT '00000000191',
+                         pdQtdPorPedido IN NUMBER DEFAULT 400)
+IS
+    v_seq_pedido       NUMBER;
+ -- v_qtd_lote         NUMBER := 400; -- Fara loop a cada 400 itens (agora usa pdQtdPorPedido)
+    v_total            NUMBER;
+BEGIN
+
+    -- Total de produtos pendentes
+    SELECT COUNT(*)
+      INTO v_total
+      FROM NAGT_BASE_PRODUTOS_PED
+     WHERE PROCESSADO = 'N';
+
+    WHILE v_total > 0 LOOP
+
+        -- Gera novo nro de pedido
+        SELECT NVL(MAX(SEQEDIPEDVENDA),0) + 1
+          INTO v_seq_pedido
+          FROM consinco.edi_pedvenda;
+
+        -- Cria pedido
+        consinco.sp_inserePedidoSitemercado_V3(
+            v_seq_pedido,
+            pdNroEmpresa,
+            SUBSTR(pdCPF,0,9),
+            SUBSTR(pdCPF,10,2),
+            'PEDIDO AUTOMATICO PDV LJ '||pdNroEmpresa,
+            'PEDIDO AUTOMATICO PDV LJ '||pdNroEmpresa,
+            'F',
+            '',
+            'TESTE',
+            'SP',
+            'BAIRRO',
+            'ENDERECO',
+            '0',
+            '',
+            '00000000',
+            '11',
+            '999999999',
+            '',
+            '',
+            NULL,NULL,NULL,NULL,
+            'R',
+            TO_DATE('01/01/1990','DD/MM/YYYY'),
+            0,
+            400,
+            77,
+            'AUTO',
+            1,
+            5101,
+            NULL,
+            v_seq_pedido,
+            76,
+            'PEDIDO AUTOMATICO PDV LJ '||pdNroEmpresa,
+            '1',
+            400,
+            NULL,NULL,NULL,
+            2,
+            3,
+            NULL,NULL,
+            'IFOOD',
+            '',
+            'N',
+            '',
+            'L'
+        );
+
+        -- Inserir itens do lote
+        FOR t IN (
+            SELECT *
+            FROM (
+                SELECT X.ROWID id_linha,
+                       X.*,
+                       ROW_NUMBER() OVER (ORDER BY X.SEQPRODUTO) seqitem
+                  FROM NAGT_BASE_PRODUTOS_PED X
+                 WHERE X.PROCESSADO = 'N'
+            )
+            WHERE ROWNUM <= pdQtdPorPedido
+        )
+        LOOP
+
+            INSERT INTO edi_pedvendaitem
+            (seqedipedvenda, seqpedvendaitem, codacesso, seqproduto,
+             nrocondicaopagto, qtdpedida, qtdembalagem,
+             vlrembtabpreco, vlrembtabpromoc, vlrembinformado)
+            VALUES
+            (v_seq_pedido, t.seqitem, t.codacesso, t.seqproduto,
+             0, 1, 1, 1, 0, 1);
+
+            UPDATE NAGT_BASE_PRODUTOS_PED
+               SET PROCESSADO = 'S'
+             WHERE ROWID = t.id_linha;
+
+        END LOOP;
+        
+        INSERT INTO NAGT_PED_GERADO VALUES (v_seq_pedido, pdNroEmpresa, SYSDATE);
+
+        COMMIT;
+
+        -- Atualiza total restante
+        SELECT COUNT(*)
+          INTO v_total
+          FROM NAGT_BASE_PRODUTOS_PED
+         WHERE PROCESSADO = 'N';
+
+    END LOOP;
+
+END;
+
+END NAGPKG_GERA_PEDVENDA;
