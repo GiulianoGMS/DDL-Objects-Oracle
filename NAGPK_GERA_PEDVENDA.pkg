@@ -2,7 +2,8 @@ CREATE OR REPLACE PACKAGE NAGPKG_GERA_PEDVENDA AS
 
     PROCEDURE INSERE_PROD_BASE_PEDVENDA (
         pdNroEmpresa      IN NUMBER,
-        pdQtdLimiteItens IN NUMBER DEFAULT 4000
+        pdQtdLimiteItens  IN NUMBER DEFAULT 4000,
+        pdNroEmpBaseVenda IN NUMBER
     );
 
     PROCEDURE GERA_PEDVENDA (
@@ -13,11 +14,13 @@ CREATE OR REPLACE PACKAGE NAGPKG_GERA_PEDVENDA AS
 
 END NAGPKG_GERA_PEDVENDA;
 
+--======================
 
 CREATE OR REPLACE PACKAGE BODY NAGPKG_GERA_PEDVENDA AS
 
-PROCEDURE INSERE_PROD_BASE_PEDVENDA (pdNroEmpresa     IN NUMBER,
-                                     pdQtdLimiteItens IN NUMBER DEFAULT 4000) AS
+PROCEDURE INSERE_PROD_BASE_PEDVENDA (pdNroEmpresa      IN NUMBER,
+                                     pdQtdLimiteItens  IN NUMBER DEFAULT 4000,
+                                     pdNroEmpBaseVenda IN NUMBER) AS
 BEGIN
   
  -- Primeiro atualiza tudo que nao for N para 'X', evita pegar coisa indevida no prox pedido
@@ -40,6 +43,8 @@ BEGIN
                    AND X.SEQPRODUTO = P.SEQPRODUTO
                    AND X.STATUSVENDA = 'A' 
                    AND X.NROEMPRESA = pdNroEmpresa)
+                   
+    AND EXISTS (SELECT 2 FROM MRL_PRODUTOEMPRESA E WHERE E.SEQPRODUTO = P.SEQPRODUTO AND E.NROEMPRESA = pdNroEmpBaseVenda AND E.DTAULTVENDA >= TRUNC(SYSDATE) - 90)
                    
     AND NVL(F.COMPCESTABASICA, 'N') = 'N'
     AND COD.TIPCODIGO IN ('E', 'B')
