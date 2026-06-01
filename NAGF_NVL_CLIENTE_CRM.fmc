@@ -1,0 +1,50 @@
+SELECT SEQPESSOA, NOMERAZAO, 
+       NAGF_NVL_CLIENTE_CRM(LPAD(NROCGCCPF,CASE WHEN FISICAJURIDICA = 'J' THEN 12 ELSE 9 END,0)||LPAD(DIGCGCCPF,2,0), 'C') NIVEL_CRM,
+       NAGF_NVL_CLIENTE_CRM(LPAD(NROCGCCPF,CASE WHEN FISICAJURIDICA = 'J' THEN 12 ELSE 9 END,0)||LPAD(DIGCGCCPF,2,0), 'F') CALC_CRM 
+  FROM GE_PESSOA
+ WHERE NROCGCCPF = 123456789; 
+
+CREATE OR REPLACE FUNCTION NAGF_NVL_CLIENTE_CRM (
+    psCpfCNPJ IN VARCHAR2,
+    psTipo    IN VARCHAR2 DEFAULT 'C' -- C=Classificação, F=Fórmula
+)
+RETURN VARCHAR2
+IS
+    vCategoria    VARCHAR2(20);
+    vUltCompra    DATE;
+    vCompras30    NUMBER;
+BEGIN
+
+    SELECT MAX(DTACOMPRA),
+           SUM(CASE
+                 WHEN DTACOMPRA >= TRUNC(SYSDATE) - 30 THEN 1
+                 ELSE 0
+               END)
+      INTO vUltCompra,
+           vCompras30
+      FROM NAGT_BASE_IDENTIFICADA_FRENTES@CONSINCODW
+     WHERE CPFCNPJ = psCpfCNPJ;
+
+    vCompras30 := NVL(vCompras30, 0);
+
+    vCategoria :=
+       CASE
+          WHEN vUltCompra < TRUNC(SYSDATE) - 60 THEN 'Inativo'
+          WHEN vUltCompra BETWEEN TRUNC(SYSDATE) - 60
+                             AND TRUNC(SYSDATE) - 30 THEN 'Ocasional'
+          WHEN vCompras30 >= 8 THEN 'Gold'
+          WHEN vCompras30 BETWEEN 4 AND 7 THEN 'Silver'
+          ELSE 'Bronze'
+       END;
+
+    IF psTipo = 'C' THEN
+       RETURN vCategoria;
+    ELSIF psTipo = 'F' THEN
+       RETURN 'Nivel CRM: ' || vCategoria ||
+              ' | UltCompra: ' || TO_CHAR(vUltCompra, 'DD/MM/YYYY') ||
+              ' | Compras30Dias: ' || vCompras30;
+    END IF;
+
+    RETURN vCategoria;
+
+END;
