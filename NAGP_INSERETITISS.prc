@@ -12,18 +12,19 @@ E depois rodar a CONSINCO.CAFD_INTEG_TIT_FINANCEIRO
 
 --=======================================================--
 
-CREATE OR REPLACE PROCEDURE CONSINCO.NAGP_INSERETITISS (nroTituloBase IN NUMBER,
+CREATE OR REPLACE PROCEDURE NAGP_INSERETITISS (nroTituloBase IN NUMBER,
+                                               nroEmpresaBase IN NUMBER,
                                                         nroTituloServ IN NUMBER,
                                                         vlrSERV       IN NUMBER,
                                                         nroTituloIss  IN NUMBER,
                                                         vlrISS        IN NUMBER,
                                                         vEmissao      IN DATE,
                                                         vVencimento   IN DATE)
-                                               
+
                                                AS
       -- Por Giuliano em 11/11/24
-      -- Inserir titulos ISSQN e SERVRC quando os memos não forem gerados            
-      -- Utilizando um anterior como base                             
+      -- Inserir titulos ISSQN e SERVRC quando os memos não forem gerados
+      -- Utilizando um anterior como base
  BEGIN
 
 INSERT INTO CONSINCO.MRL_TITULOFIN X  (X.SEQTITULO,
@@ -274,8 +275,8 @@ SELECT (SELECT MAX(SEQTITULO) FROM CONSINCO.MRL_TITULOFIN) + ROWNUM,
        X.VLRDSCCONTRATOOPERABATIMENTO,
        X.VLRDESCFUNSENAR,
        X.VLRDESCFUNRAT,
-       X.VLRDESCFUNPREVSOCIAL FROM CONSINCO.MRL_TITULOFIN X WHERE NROTITULO = nroTituloBase AND CODESPECIE IN ('SERVRC','ISSQN')
-       
-       AND NOT EXISTS (SELECT 1 FROM CONSINCO.MRL_TITULOFIN A WHERE A.NROTITULO = nroTituloIss AND A.CODESPECIE = X.CODESPECIE);
-       
+       X.VLRDESCFUNPREVSOCIAL FROM CONSINCO.MRL_TITULOFIN X WHERE NROTITULO = nroTituloBase AND CODESPECIE IN ('SERVRC','ISSQN') AND X.NROEMPRESA = nroEmpresaBase
+
+       AND NOT EXISTS (SELECT 1 FROM CONSINCO.MRL_TITULOFIN A WHERE A.NROTITULO = nroTituloIss AND A.CODESPECIE = X.CODESPECIE AND A.NROEMPRESA = nroEmpresaBase);
+
 END;
