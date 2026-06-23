@@ -36,8 +36,8 @@ BEGIN
      ELSE
         :NEW.QTDPEDIDA := 0;
      END IF;
+  
+   :NEW.SITUACAOITEM := 'S';
    
    END IF;
-
-   :NEW.SITUACAOITEM := 'S';
 END;
