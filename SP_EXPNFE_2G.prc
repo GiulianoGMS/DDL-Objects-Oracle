@@ -99,7 +99,7 @@ IS
     vsPD_ConsOrigemMercNfRef       MAX_PARAMETRO.VALOR%TYPE;
     vsNatOper                      tmp_m000_nf.m000_ds_nat_oper%type;
     vsIndUtilCalcFCP               max_empresa.indutilcalcfcp%type;
-		vnSeqNotaFiscalVolume          number(15);
+    vnSeqNotaFiscalVolume          number(15);
     vsPDGeraCestGenerico           max_parametro.valor%type;
     vsIndEmiteSTRefUltEntrada      MRL_CLIENTE.INDEMITESTREFULTENTRADA%TYPE;
     vnIndNFIntegraFiscal           MFLV_BASENF.INDNFINTEGRAFISCAL%TYPE;
@@ -116,6 +116,14 @@ IS
     vsPDTrocaCstPisCfXml           MAX_PARAMETRO.VALOR%TYPE;
     vsPDSubtraiICMSDesonTotItem    MAX_PARAMETRO.VALOR%TYPE;
     vsPDCalcBaseIcmsAFRMM          MAX_PARAMETRO.VALOR%TYPE;
+    vsIndConsideraImposto          CCT_PAINELCONFIGURACAO.INDCONSIDERAIMPOSTO%TYPE;
+    vsPDConsid_Imp_VlrOutras       MAX_PARAMETRO.VALOR%TYPE;
+    vsGeraNFRefDetItem             VARCHAR2(1);
+    vsIndGeraHash                  MAX_EMPRESA.INDHASHCSRT%TYPE;
+    vsIndImportExport              MAX_CODGERALOPER.INDIMPORTEXPORT%TYPE;
+    vsObsPorProduto                VARCHAR2(1000);
+    vnIndTipoFinalidadeNfe         MAX_CODGERALOPER.TIPOFINALIDADENFE%TYPE;
+    vnIndTipoNfCreditoDebitodet    MLF_NOTAFISCAL.INDTIPONFCREDITODEBITODET%TYPE;
 BEGIN
     SELECT MAX(A.NROEMPRESA), A.codgeraloper, A.tipdocfiscal
     INTO   VNNROEMPRESA, vnCodGeralOper, vsTipoDoctoFiscal
@@ -123,8 +131,8 @@ BEGIN
     WHERE  A.SEQNOTAFISCAL = pnSeqNotaFiscal
     and    a.tipuso != 'R'
     GROUP BY a.nroempresa, a.codgeraloper, A.tipdocfiscal;
-    select nvl(a.indconverteembnfe, 'N'), nvl(a.indutilcalcfcp, 'N'), a.uf
-    into vsIndConvEmbNFe, vsIndUtilCalcFCP, vsUfOrigem
+    select nvl(a.indconverteembnfe, 'N'), nvl(a.indutilcalcfcp, 'N'), a.uf, a.indhashcsrt
+    into vsIndConvEmbNFe, vsIndUtilCalcFCP, vsUfOrigem, vsIndGeraHash
     from max_empresa a
     where a.nroempresa = vnNroEmpresa;
     SP_BUSCAPARAMDINAMICO('EXPORT_NFE',0,'EMITE_COD_DESTINATARIO','S','N',
@@ -407,6 +415,14 @@ BEGIN
     SP_BUSCAPARAMDINAMICO('DECLARACAO_IMPORT', 0, 'CALC_BASE_ICMS_AFRMM', 'S', 'N',
                           'CONSIDERA O VALOR AFRMM NA BASE DE CÁLCULO DO ICMS QUANDO A VIA DE TRANSPORTE INTERNACIONAL FOR "MARÍTIMA"? VALORES:(S-SIM/N-NÃO(PADRÃO))',
                           vsPDCalcBaseIcmsAFRMM);
+    SP_BUSCAPARAMDINAMICO('EXPORT_NFE', 0, 'CONSID_IMP_VLROUTRAS', 'S', 'T',
+                          'CONSIDERA OS IMPOSTOS PIS, COFINS, VALOR DE IMPORTAÇÃO E AFRMM PARA A GERAÇÃO DO VALOR OUTRAS E VALOR OUTRAS DESPESAS' || chr(13) || chr(10) ||
+                          'PARA TODAS AS NOTAS DO PROCESSO DE IMPORTAÇÃO?' || chr(13) || chr(10) ||
+                          'T-TODAS AS NOTAS (PADRÃO)' || chr(13) || chr(10) ||
+                          'M-SOMENTE NOTA MÃE' || chr(13) || chr(10) ||
+                          'N-NENHUMA',
+                          vsPDConsid_Imp_VlrOutras);
+    vsIndConsideraImposto := PKG_CCTMOTOR.CCTF_BUSCACONFIGPAINEL(vnNroEmpresa);
     if  psSoftwarePDV = 'OPHOSNFE' and vsPDVersaoXml IN ( '3', '4')  then
         vsSoftwarePDV := 'NDDIGITAL';
     else
@@ -461,14 +477,20 @@ BEGIN
              a.tipuso, nvl(b.seqauxnotafiscal,0), b.tipofrete,
              NVL(A.INDGERIPIDEVXML, 'N'),
              NVL(B.INDNFINTEGRAFISCAL,0),
-             A.TIPDOCFISCAL
+             A.TIPDOCFISCAL,
+             NVL(A.INDIMPORTEXPORT,'N'),
+             A.TIPOFINALIDADENFE,
+             B.INDTIPONFCREDITODEBITODET
       INTO   vsIndEmiteIcms, vsIndEmiteIcmsSt,
              vsIndVlrIpiDadoAdic, vnSeqPessoaNota,
              vsIndSuspPisCofins, vsTipNotaFiscal,
              vsTipUso, vnSeqAuxNotaFiscal, vsTipoFrete,
              vsIndGeraIPIDevXML,
              vnIndNFIntegraFiscal,
-             vsTipdocfiscal
+             vsTipdocfiscal,
+             vsIndImportExport,
+             vnIndTipoFinalidadeNfe,
+             vnIndTipoNfCreditoDebitodet
       FROM   MAX_CODGERALOPER A, MFLV_BASENF B
       WHERE  A.CODGERALOPER = B.CODGERALOPER
       AND    B.SEQNOTAFISCAL = pnSeqNotaFiscal
@@ -629,6 +651,36 @@ BEGIN
          from   MRL_CLIENTE MR
          where  MR.SEQPESSOA = vnSeqPessoaNota;
       end if;
+      BEGIN
+        vsObsPorProduto := NULL;
+        SELECT SUBSTR(LISTAGG(DISTINCT obs.descricao, ' - ') WITHIN GROUP (ORDER BY obs.descricao), 1, 1000)
+          INTO vsObsPorProduto
+          FROM MRL_CADOBSERVACAO obs
+          JOIN MRL_CADOBSERVACAOPRODUTO prod ON obs.codobservacao = prod.codobservacao
+         WHERE obs.finalidade = 'I'
+           AND EXISTS (SELECT 1
+                         FROM MFLV_BASEDFITEM item
+                        WHERE item.seqnotafiscal = pnSeqNotaFiscal
+                          AND item.seqproduto = prod.seqproduto
+                          AND item.tipuso = 'E'
+                          AND item.tipcgo = 'S'
+                          AND item.tipdocfiscal != 'T'
+                          AND NVL(item.situacaonfpis, '00') IN ('06', '07')
+                          AND (
+                               NOT EXISTS (SELECT 1
+                                             FROM MRL_CADOBSERVACAOCGO cgo_ref
+                                            WHERE cgo_ref.codobservacao = obs.codobservacao)
+                               OR
+                               EXISTS (SELECT 1
+                                         FROM MRL_CADOBSERVACAOCGO cgo_ref
+                                        WHERE cgo_ref.codobservacao = obs.codobservacao
+                                          AND cgo_ref.cgo = item.codgeraloper)
+                              )
+                      );
+      EXCEPTION
+        WHEN OTHERS THEN
+          vsObsPorProduto := NULL;
+      END;
       INSERT INTO TMP_M000_NF(
               M000_ID_NF, M000_VL_RET_PREV, M000_VL_TOTAL_II,
               M000_DS_NAT_OPER, M000_DS_UF_EMBARQUE, M000_NR_MODELO,
@@ -682,7 +734,42 @@ BEGIN
               CFOP_DEV_VEND_N_RECONHEC,
               M000_NR_CHAVE_ACESSO,
               M000_VL_BC_ICMS_MONO_RET,
-              M000_VL_ICMS_MONO_RET)
+              M000_VL_ICMS_MONO_RET,
+              --Reforma
+              M000_NR_IBGE_MUN_FG_IBS,
+              M000_TP_INDNOTADEBITO,
+              M000_TP_INDNOTACREDITO,
+              M000_TP_INDENTEGOV,
+              M000_PER_REDALIQCGOV,
+              M000_TP_INDOPERGOV,
+              M000_DS_CHAVEACESSOREFPAGANTECIP,
+              M000_VL_VLRIMPOSTOIS,
+              M000_VL_VLRBASEIBSUF,
+              M000_VL_VLRBASEIBSMUN,
+              M000_VL_VLRBASECBS,
+              M000_VL_VLRIMPOSTOIBS,
+              M000_VL_VLRCCREDPRESIBSUF,
+              M000_VL_VLRCCREDPRESCONDSUSIBSUF,
+              M000_VL_VLRDIFERIDOIBSUF,
+              M000_VL_VLRDEVTRIBIBSUF,
+              M000_VL_VLRIMPOSTOIBSUF,
+              M000_VL_VLRDIFERIDOIBSMUN,
+              M000_VL_VLRDEVTRIBIBSMUN,
+              M000_VL_VLRIMPOSTOIBSMUN,
+              M000_VL_VLRDIFERIDOCBS,
+              M000_VL_VLRDEVTRIBCBS,
+              M000_VL_VLRIMPOSTOCBS,
+              M000_VL_VLRCCREDPRESCBS,
+              M000_VL_VLRCCREDPRESCONDSUSCBS,
+              M000_VL_VLRIMPOSTOMONOIBS,
+              M000_VL_VLRIMPOSTOMONOCBS,
+              M000_VL_VLRIMPOSTOMONORETENIBS,
+              M000_VL_VLRIMPOSTOMONORETENCBS,
+              M000_VL_VLRIMPOSTOMONORETIBS,
+              M000_VL_VLRIMPOSTOMONORETCBS,
+              M000_VL_NFTOT,
+              M000_VL_VLRIMPOSTOESTORNOIBS,
+              M000_VL_VLRIMPOSTOESTORNOCBS)
       SELECT  vnSeqM000_ID_NF as M000_ID_NF,
               A.VLRDESCINSS as M000_VL_RET_PREV,
               case when a.vlrimpostoimport > 0 then
@@ -698,7 +785,7 @@ BEGIN
               NULL as M000_DS_NF_EMPENHO,
               0 AS M000_DM_IMPRESSA,
               fc5_RetNroPedVdaClie_NFe(A.SEQNOTAFISCAL,A.SEQPESSOA,null,null,A.TIPOTABELA,A.nropedidovenda,A.nroempresa) as M000_DS_PEDIDO,
-                DECODE( vsPDDataPadraoEmissaoNF,
+              DECODE( vsPDDataPadraoEmissaoNF,
                         'S', NVL(A.DTAHORSAIDA,A.DTAENTRADA),
                         'D', A.DTAHORSAIDA,
                         'P', case NVL(A.DTAHORSAIDA,A.DTAENTRADA) when TRUNC(NVL(A.DTAHORSAIDA,A.DTAENTRADA)) THEN
@@ -707,18 +794,20 @@ BEGIN
                                NVL(A.DTAHORSAIDA,A.DTAENTRADA)
                              end,
                         A.DTAENTRADA
-              )  as M000_DT_ENTRADA_SAIDA,
+              ) as M000_DT_ENTRADA_SAIDA,
               NULL as M000_DS_CONTRATO,
-              CASE WHEN A.INDNFEAJUSTECANCEL = 'S' AND A.APPORIGEM = 23 THEN
-                TRIM(A.OBSERVACAOLF)
-              ELSE
-                CASE WHEN vsPDEmiteObsImpostoRetidoSP = 'S' AND A.UFDESTINO = 'SP' THEN
-                  fEmiteObsImpostoRetidoSP(A.codgeraloper, A.seqnotafiscal,
-                                           vsPDIndGeraRefFabricCodProd, vsUfOrigem)
+              NVL2(vsObsPorProduto, vsObsPorProduto || '. ', '') ||
+                CASE WHEN A.INDNFEAJUSTECANCEL = 'S' AND A.APPORIGEM = 23 THEN
+                  TRIM(A.OBSERVACAOLF)
                 ELSE
-                  NULL
-                END
-              END as M000_DS_INFO_FISCO,
+                  CASE WHEN vsPDEmiteObsImpostoRetidoSP = 'S' AND A.UFDESTINO = 'SP' THEN
+                    fEmiteObsImpostoRetidoSP(A.codgeraloper, A.seqnotafiscal, vsPDIndGeraRefFabricCodProd, vsUfOrigem)
+                  ELSE
+                    NULL
+                  END
+              END -- Alt Giuliano LC 224/2025
+              || NAGF_OBSINFOADFISCO(A.SEQNF, A.codgeraloper)
+        as M000_DS_INFO_FISCO,
               replace(regexp_replace(TRIM(nvl(a.observacaonfe, fc5_NFEObservacaoNF(a.seqnotafiscal))), ';', '.'), '"', '') as M000_DS_INFO_CONTRIB,
               1 as M000_DM_ST_PROC,
               NULL as M000_DM_FMT_DANFE,
@@ -777,10 +866,8 @@ BEGIN
                           'S', DECODE(vsPDConsidVlrDescEspecialItem, 'S', 0, nvl(a.vlrdescsf, 0)),
                           A.VLRDESCONTO - DECODE(vsPDConsidVlrDescEspecialItem, 'S', nvl(a.vlrdescsf, 0), 0)
                 )
-                +
-                decode(a.tipotabela, 'D', round(a.VLRDESCINCONDIC, 2), 0)
-                - nvl(decode(nvl(vsGERA_ITEM_LIQ_DESC, 'N'), 'N',
-                     nvl(a.VLRDESCSUFRAMA, 0)+ nvl(DECODE(a.INDSUBTRAIICMSDESONTOTITEM, 'S', decode(a.VLRTOTICMSDESONITEMSUBTRAI,0,a.vlrdescicms,a.VLRTOTICMSDESONITEMSUBTRAI)), 0)), 0)
+                + decode(a.tipotabela, 'D', round(a.VLRDESCINCONDIC, 2), 0)
+                - nvl(decode(nvl(vsGERA_ITEM_LIQ_DESC, 'N'), 'N', nvl(a.VLRDESCSUFRAMA, 0) + nvl(a.VLRTOTICMSDESONITEMSUBTRAI, 0)), 0)
                 - nvl(a.vlrdescdespesa, 0)
               ) as M000_VL_DESCONTO,
               case when vsPD_SitDescPisSuspZFM = '06' and vnCountCidadeZFM > 0  then
@@ -827,17 +914,23 @@ BEGIN
                   0
                 end
                 -
-                case when d.indimportexport = 'S' then
+                case when d.indimportexport = 'S'
+                  and (vsPDConsid_Imp_VlrOutras = 'T' OR ( vsPDConsid_Imp_VlrOutras = 'M' and a.apporigem in (35))) then
                   (nvl(a.vlrpis, 0) + nvl(a.vlrcofins, 0) + nvl(a.vlrimpimportexport, 0))
                 else
                   0
                 end
                 -
-                case when d.indimportexport = 'S' and vsPDCalcBaseIcmsAFRMM = 'S' then
+                case when d.indimportexport = 'S' and vsPDCalcBaseIcmsAFRMM = 'S'
+                  and (vsPDConsid_Imp_VlrOutras = 'T' OR ( vsPDConsid_Imp_VlrOutras = 'M' and a.apporigem in (35))) then
                  nvl(a.vlrafrmm, 0)
                 else
                   0
                 end
+              -- Giuliano 06/05/26
+              - 
+              CASE WHEN nvl(a.vlrfreteitemrateio, 0) > 0 THEN NAGF_SUBTRAI_DESP_CENT_ECOMM(NVL(A.VLRDESPACESSORIA,0), A.APPORIGEM, A.CODGERALOPER) ELSE 0 END
+              --
               ) as M000_VL_OUTROS,
               A.VLRSERVICO as M000_VL_SERV,
               A.VLRISS as M000_VL_ISS,
@@ -892,13 +985,12 @@ BEGIN
                 -
                 nvl(fValorProdFinalidade(a.id_df, a.tipotabela, 'S', 'F', 'N'), 0)
               ) as M000_VL_PROD,
-              
-                case when A.APPORIGEM in (23, 18, 2)
+              case when A.APPORIGEM in (23, 18, 2)
                    and A.tipotabela = 'N' then
                       sysdate
                       --to_date(to_char(A.dtaemissao, 'DD-MON-YYYY') || ' ' || trim(to_char(A.DTAHOREMISSAO, 'HH24:MI:ss')), 'DD-MM-YYYY HH24:MI:ss')
               else
-               A.DTAHOREMISSAO 
+                A.DTAHOREMISSAO
               end as M000_DT_EMISSAO,
               ( A.VLRCONTABILSEMFUNRURAL
                 +
@@ -973,7 +1065,7 @@ BEGIN
               A.VLRFCP as M000_VLRFCPUFDEST,
               A.VLRICMSCALCDESTINO as M000_VLRICMSUFDEST,
               DECODE(D.TIPDOCFISCAL,'D',0, A.VLRICMSCALCORIGEM) as M000_VLRICMSUFREMET,
-              DECODE(D.TIPDOCFISCAL,'D',0, DECODE(NVL(D.INDCONSUMIDORFINAL,A.INDCONSUMIDORFINAL), 'S', 1, 0)) as M000_INDFINAL,
+              DECODE(NVL(D.INDCONSUMIDORFINAL,A.INDCONSUMIDORFINAL), 'S', 1, 0) as M000_INDFINAL,
               nvl(( select max(1)
                     from   mrl_titulofin c
                     where  c.nroempresa = a.nroempresa
@@ -996,7 +1088,69 @@ BEGIN
               vnCfop_Dev_Vend_N_Reconhec,
               A.NFECHAVEACESSO,
               A.VLRBCICMSMONORET,
-              A.VLRICMSMONORET
+              A.VLRICMSMONORET,
+              MUNEMI.CODIBGE AS M000_NR_IBGE_MUN_FG_IBS,
+              CASE WHEN D.TIPOFINALIDADENFE = 6 THEN a.indtiponfcreditodebitodet END AS M000_TP_INDNOTADEBITO,
+              CASE WHEN D.TIPOFINALIDADENFE = 5 THEN a.indtiponfcreditodebitodet END AS M000_TP_INDNOTACREDITO,
+              NULL AS M000_TP_INDENTEGOV,
+              NULL AS M000_PER_REDALIQCGOV,
+              NULL AS M000_TP_INDOPERGOV,
+              NULL AS M000_DS_CHAVEACESSOREFPAGANTECIP,
+              A.VLRIMPOSTOIS AS M000_VL_VLRIMPOSTOIS,
+              A.VLRBASEIBSUF AS M000_VL_VLRBASEIBSUF,
+              A.VLRBASEIBSMUN AS M000_VL_VLRBASEIBSMUN,
+              A.VLRBASECBS AS M000_VL_VLRBASECBS,
+              A.VLRIMPOSTOIBSUF + A.VLRIMPOSTOIBSMUN AS M000_VL_VLRIMPOSTOIBS,
+              A.VLRCCREDPRESIBSUF AS M000_VL_VLRCCREDPRESIBSUF,
+              0 AS M000_VL_VLRCCREDPRESCONDSUSIBSUF,
+              A.VLRDIFERIDOIBSUF AS M000_VL_VLRDIFERIDOIBSUF,
+              0 AS M000_VL_VLRDEVTRIBIBSUF,
+              A.VLRIMPOSTOIBSUF AS M000_VL_VLRIMPOSTOIBSUF,
+              A.VLRDIFERIDOIBSMUN AS M000_VL_VLRDIFERIDOIBSMUN,
+              0 AS M000_VL_VLRDEVTRIBIBSMUN,
+              A.VLRIMPOSTOIBSMUN AS M000_VL_VLRIMPOSTOIBSMUN,
+              A.VLRDIFERIDOCBS AS M000_VL_VLRDIFERIDOCBS,
+              0 AS M000_VL_VLRDEVTRIBCBS,
+              A.VLRIMPOSTOCBS AS M000_VL_VLRIMPOSTOCBS,
+              A.VLRCCREDPRESCBS AS M000_VL_VLRCCREDPRESCBS,
+              0 AS M000_VL_VLRCCREDPRESCONDSUSCBS,
+              0 AS M000_VL_VLRIMPOSTOMONOIBS,
+              0 AS M000_VL_VLRIMPOSTOMONOCBS,
+              0 AS M000_VL_VLRIMPOSTOMONORETENIBS,
+              0 AS M000_VL_VLRIMPOSTOMONORETENCBS,
+              A.VLRIMPOSTOMONORETIBSUF AS M000_VL_VLRIMPOSTOMONORETIBS,
+              A.VLRIMPOSTOMONORETCBS AS M000_VL_VLRIMPOSTOMONORETCBS,
+              ( decode( vsGERA_ITEM_LIQ_DESC,
+                          'S', A.VLRITEM
+                               -
+                               A.VLRDESCONTO
+                               +
+                               DECODE(vsPDConsidVlrDescEspecialItem, 'S', 0, nvl(a.vlrdescsf, 0))
+                               + DECODE(a.INDSUBTRAIICMSDESONTOTITEM, 'S', decode(a.VLRTOTICMSDESONITEMSUBTRAI,0,a.vlrdescicms,a.VLRTOTICMSDESONITEMSUBTRAI), 0),
+                          A.VLRITEM - DECODE(vsPDConsidVlrDescEspecialItem, 'S', nvl(a.vlrdescsf, 0), 0)
+                )
+                -
+                case when (A.APPORIGEM = 14 Or (A.APPORIGEM = 2 And D.TIPDOCFISCAL = 'D')) then
+                  ( nvl(fValorProdFinalidade(a.id_df, a.tipotabela, 'D', 'F', 'N'), 0) +
+                    nvl(fValorProdFinalidade(a.id_df, a.tipotabela, 'F', 'F', 'N'), 0) +
+                    nvl(fValorProdFinalidade(a.id_df, a.tipotabela, 'G', 'F', 'N'), 0)
+                  )
+                else
+                  0
+                end
+                -
+                nvl(fValorProdFinalidade(a.id_df, a.tipotabela, 'S', 'F', 'N'), 0)
+              ) +
+              CASE WHEN NVL(vsIndConsideraImposto,'N') = 'S'
+                   THEN A.VLRIMPOSTOIS + A.VLRIMPOSTOIBSMUN + A.VLRIMPOSTOIBSUF + A.VLRIMPOSTOCBS
+                   ELSE 0
+              END AS M000_VL_NFTOT,
+              CASE WHEN D.TIPOFINALIDADENFE = 6 AND a.indtiponfcreditodebitodet = 7
+                   THEN A.VLRIMPOSTOIBSUF
+                   END AS M000_VL_VLRIMPOSTOESTORNOIBS,
+              CASE WHEN D.TIPOFINALIDADENFE = 6 AND a.indtiponfcreditodebitodet = 7
+                   THEN A.VLRIMPOSTOCBS
+                   END AS M000_VL_VLRIMPOSTOESTORNOCBS
       FROM    MFLV_BASENF      A,
               GE_EMPRESA       B,
               MAX_CODGERALOPER D,
@@ -1008,12 +1162,21 @@ BEGIN
       AND     A.SEQPESSOA      = E.SEQPESSOA
       AND     A.SEQNOTAFISCAL  = pnSeqNotaFiscal
       AND     D.TIPUSO         != 'R';
+      IF vsIndGeraHash = 'N' THEN
       UPDATE MLF_NOTAFISCAL
       SET    STATUSNFE = 1
       WHERE  SEQNOTAFISCAL = pnSeqNotaFiscal;
       UPDATE MFL_DOCTOFISCAL
       SET    STATUSNFE = 1
       WHERE  SEQNOTAFISCAL = pnSeqNotaFiscal;
+      ELSE
+         UPDATE MLF_NOTAFISCAL
+         SET    STATUSNFE = 27
+         WHERE  SEQNOTAFISCAL = pnSeqNotaFiscal;
+         UPDATE MFL_DOCTOFISCAL
+         SET    STATUSNFE = 27
+         WHERE  SEQNOTAFISCAL = pnSeqNotaFiscal;
+      END IF;
       INSERT INTO TMP_M001_EMITENTE(
               M000_ID_NF, M001_DS_BAIRRO, M001_NR_CEP,
               M001_NR_IE, M001_NR_IBGE_MUN,
@@ -1032,7 +1195,7 @@ BEGIN
               SUBSTR(TRIM(B.INSCRESTADUAL),1,14) as M001_NR_IE,
               G.CODIBGE as M001_NR_IBGE_MUN,
               case when ((vsEmite_IE_ST = 'S') or (vsEmite_IE_ST = 'I' and A.VLRICMSST > 0)) then
-                ( select	max(x.inscricao)
+                ( select  max(x.inscricao)
                   from    rf_inscruf x,
                           ge_pessoa p
                   where   x.nroempresa  =  a.nroempresa
@@ -1143,7 +1306,7 @@ BEGIN
                          NVL(E.EMAILNFE, E.EMAIL)
                        ELSE
                          SUBSTR(NVL(E.EMAILNFE, E.EMAIL), 0, INSTR(NVL(E.EMAILNFE, E.EMAIL), ';', 1, 1)-1)
-        		         END, 0, 60) AS M002_DS_EMAIL,
+                     END, 0, 60) AS M002_DS_EMAIL,
               NVL(E.EMAILNFE, E.EMAIL) as EMAILNFEC5,
               REPLACE(E.FANTASIA, ';', '') as M002_NM_FANTASIA,
               E.INDCONTRIBICMS as M002_IND_CONTRIB_ICMS,
@@ -1354,7 +1517,123 @@ BEGIN
               M014_ALIQ_CRED_PRESUMIDO,
               M014_VL_CRED_PRESUMIDO,
               M014_CD_BENEF_RBC,
-              M014_DM_DEDUZ_DESON
+              M014_DM_DEDUZ_DESON,
+              --Reforma
+              M014_TP_INDBEMMOVELUSADO,
+              M014_VL_VLRITEM,
+              --Is
+              M014_CD_CSTIS,
+              M014_DS_CCLASSTRIBIS,
+              M014_VL_VLRBASEIS,
+              M014_VL_PERALIQIS,
+              M014_VL_PERALIQEUNIS,
+              M014_VL_VLRIMPOSTOIS,
+              M014_DS_UNTRIBIS,
+              M014_VL_QTDTRIBIS,
+              --Ibs
+              M014_VL_VLRIMPOSTOIBS,
+              --Ibs Uf
+              M014_CD_CSTIBSUF,
+              M014_DS_CCLASSTRIBIBSUF,
+              M014_VL_VLRBASEIBSUF,
+              M014_VL_PERALIQIBSUF,
+              M014_VL_VLRIMPOSTOIBSUF,
+              M014_VL_PERDIFERIDOIBSUF,
+              M014_VL_VLRDIFERIDOIBSUF,
+              M014_VL_VLRDEVTRIBIBSUF,
+              M014_VL_PERALIQREDIBSUF,
+              M014_VL_PERALIQEFETIVAIBSUF,
+              M014_CD_CSTREGULARIBSUF,
+              M014_DS_CCLASSTRIBREGULARIBSUF,
+              M014_VL_PERALIQREGULARIBSUF,
+              M014_VL_VLRIMPOSTOREGULARIBSUF,
+              M014_VL_VLRBASECCREDPRESIBSUF,
+              M014_CD_CCREDPRESIBSUF,
+              M014_VL_PERALIQCCREDPRESIBSUF,
+              M014_VL_VLRCCREDPRESIBSUF,
+              M014_VL_VLRCCREDPRESCONDSUSIBSUF,
+              M014_VL_PERALIQCOMPRAGOVIBSUF,
+              M014_VL_VLRIMPOSTOCOMPRAGOVIBSUF,
+              M014_VL_VLRIMPOSTOTRANSFERIDOIBS,
+              M000_TP_INDCREDPRESZFMIBS,
+              M014_VL_VLRCCREDPRESZFMIBS,
+              -- Ibs Mun
+              M014_CD_CSTIBSMUN,
+              M014_DS_CCLASSTRIBIBSMUN,
+              M014_VL_VLRBASEIBSMUN,
+              M014_VL_PERALIQIBSMUN,
+              M014_VL_VLRIMPOSTOIBSMUN,
+              M014_VL_PERDIFERIDOIBSMUN,
+              M014_VL_VLRDIFERIDOIBSMUN,
+              M014_VL_VLRDEVTRIBIBSMUN,
+              M014_VL_PERALIQREDIBSMUN,
+              M014_VL_PERALIQEFETIVAIBSMUN,
+              M014_CD_CSTREGULARIBSMUN,
+              M014_DS_CCLASSTRIBREGULARIBSMUN,
+              M014_VL_PERALIQREGULARIBSMUN,
+              M014_VL_VLRIMPOSTOREGULARIBSMUN,
+              M014_VL_PERALIQCOMPRAGOVIBSMUN,
+              M014_VL_VLRIMPOSTOCOMPRAGOVIBSMUN,
+              -- Cbs
+              M014_CD_CSTCBS,
+              M014_DS_CCLASSTRIBCBS,
+              M014_VL_VLRBASECBS,
+              M014_VL_PERALIQCBS,
+              M014_VL_VLRIMPOSTOCBS,
+              M014_VL_PERDIFERIMENTOCBS,
+              M014_VL_VLRIMPOSTOBRUTOCBS,
+              M014_VL_VLRDIFERIDOCBS,
+              M014_VL_VLRDEVTRIBCBS,
+              M014_VL_PERALIQREDCBS,
+              M014_VL_PERALIQEFETIVACBS,
+              M014_CD_CSTREGULARCBS,
+              M014_DS_CCLASSTRIBREGULARCBS,
+              M014_VL_PERALIQREGULARCBS,
+              M014_VL_VLRIMPOSTOREGULARCBS,
+              M014_VL_VLRBASECCREDPRESCBS,
+              M014_CD_CCREDPRESCBS,
+              M014_VL_PERALIQCCREDPRESCBS,
+              M014_VL_VLRCCREDPRESCBS,
+              M014_VL_VLRCCREDPRESCONDSUSCBS,
+              M014_VL_PERALIQCOMPRAGOVCBS,
+              M014_VL_VLRIMPOSTOCOMPRAGOVCBS,
+              M014_VL_VLRIMPOSTOTRANSFERIDOCBS,
+              -- Reforma Mono
+              M014_VL_QTDE_TRIB_MONO,
+              M014_VL_PERALIQADREMIBS,
+              M014_VL_PERALIQADREMCBS,
+              M014_VL_VLRIMPOSTOMONOIBS,
+              M014_VL_VLRIMPOSTOMONOCBS,
+              M014_VL_VLRIMPOSTOINTEGRALMONOIBS,
+              M014_VL_VLRIMPOSTOINTEGRALMONOCBS,
+              M014_VL_QTDE_TRIB_MONORETENIBS,
+              M014_VL_PERALIQMONORETENIBS,
+              M014_VL_VLRIMPOSTOMONORETENIBS,
+              M014_VL_PERALIQMONORETENCBS,
+              M014_VL_VLRIMPOSTOMONORETENCBS,
+              M014_VL_QTDE_TRIB_MONORETIBS,
+              M014_VL_PERALIQMONORETIBS,
+              M014_VL_VLRIMPOSTOMONORETIBS,
+              M014_VL_PERALIQMONORETCBS,
+              M014_VL_VLRIMPOSTOMONORETCBS,
+              M014_VL_PERDIFERIMENTOMONOIBS,
+              M014_VL_VLRDIFERIDOMONOIBS,
+              M014_VL_PERDIFERIMENTOMONOCBS,
+              M014_VL_VLRDIFERIDOMONOCBS,
+              -- Reforma Doc Ref
+              M014_DS_CHAVEACESSOREF,
+              M014_DS_NROITEMREF,
+              --Agropecuario
+              M014_TP_GUIAAGRO,
+              M014_NR_RECEITUARIO,
+              M014_NR_CPFRESPTECNICO,
+              M014_TP_GUIATRANSITO,
+              M014_UF_GUIA,
+              M014_NR_SERIEGUIA,
+              M014_NR_GUIA,
+              -- Reforma estorno
+              M014_VL_VLRIMPOSTOESTORNOIBS,
+              M014_VL_VLRIMPOSTOESTORNOCBS
               )
       SELECT  case when vsSoftwarePDV = 'OPHOSNFE' then
                   fBuscaSeqTmpOphus('TMP_M014_ITEM')
@@ -1515,11 +1794,11 @@ BEGIN
               (case
                    WHEN fmlf_validanfedeajuste(vnCodGeralOper) = 1 OR nvl(a.indqtdzeradanfcompl, 'N') = 'S' THEN 0
                    WHEN vsIndIipoEmbDanfeClie = 'M' then A.QUANTIDADE/fminembfamilia(B.SEQFAMILIA)
-                   when vsIndIipoEmbDanfeClie = 'V' then A.QUANTIDADE/FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, A.NROSEGMENTO)
+                   when vsIndIipoEmbDanfeClie = 'V' then A.QUANTIDADE/FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, NVL(A.NROSEGITEM, A.NROSEGMENTO))
                    else A.QUANTIDADE/A.QTDEMBALAGEM end) as M014_VL_QTDE_COM,
               fc5_NFeCodAcesso(A.NROEMPRESA, A.SEQPRODUTO,Decode (vsIndIipoEmbDanfeClie, 'M',fminembfamilia(B.SEQFAMILIA),
                                                                'V', FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA,
-                                                                A.NROSEGMENTO),
+                                                                NVL(A.NROSEGITEM, A.NROSEGMENTO)),
               A.QTDEMBALAGEM), 'N') as M014_CD_EAN,
               decode(vsGERA_ITEM_LIQ_DESC,'S',
                                DECODE(vsPDConsidVlrDescEspecialItem, 'S', 0, nvl( a.vlrdescsf, 0 ) ),
@@ -1637,23 +1916,23 @@ BEGIN
                         b.codprodfiscal
                   else
                         decode(g.tipocodprodnf,
-                    			 'S',
-                    			 decode(vsPDIndGeraRefFabricCodProd,
-                    					'S',
-                    					NVL(B.REFFABRICANTE, A.SEQPRODUTO),
-                    					A.SEQPRODUTO),
-                    			 'I',
-                    			 NVL(FCODACESSOPRODEMB(A.SEQPRODUTO, 'B', 0, A.QTDEMBALAGEM),
-                    				 A.seqproduto),
+                           'S',
+                           decode(vsPDIndGeraRefFabricCodProd,
+                              'S',
+                              NVL(B.REFFABRICANTE, A.SEQPRODUTO),
+                              A.SEQPRODUTO),
+                           'I',
+                           NVL(FCODACESSOPRODEMB(A.SEQPRODUTO, 'B', 0, A.QTDEMBALAGEM),
+                             A.seqproduto),
                             'F',
                             NVL(FBUSCACODACESSOFORNEC(A.SEQPRODUTO, A.QTDEMBALAGEM, FMAP_FORNECFAMILIA(A.SEQFAMILIA)),
-                            	A.SEQPRODUTO),
-                    			 NVL(FCODACESSOPRODEMBNF(A.NROEMPRESA,
+                              A.SEQPRODUTO),
+                           NVL(FCODACESSOPRODEMBNF(A.NROEMPRESA,
                                        A.SEQPRODUTO,
-                    									 g.tipocodprodnf,
-                    									 NULL,
-                    									 A.QTDEMBALAGEM, null, 'N'),
-                    				 A.seqproduto))
+                                       g.tipocodprodnf,
+                                       NULL,
+                                       A.QTDEMBALAGEM, null, 'N'),
+                             A.seqproduto))
               end as M014_CD_PRODUTO,
               case when fmap_familiafinalidade(b.seqfamilia, a.nroempresa) = 'S' then
                      null
@@ -1683,11 +1962,16 @@ BEGIN
                         to_char(C.CODTIPI)
                    end
               end as M014_CD_EX_TIPI,
+              -- Giuliano 17/06/26
+              -- Ticket 463190
+              CASE WHEN A.CODGERALOPER IN (97,244,803,850) AND NAGF_BUSCA_CST_IPI_FAM(B.SEQFAMILIA) = '50'
+                   THEN 10 ELSE
               case when fmap_familiafinalidade(b.seqfamilia, a.nroempresa) = 'S' then
                      null
               else
                   fRetornaSituacaoIpiOphos( A.SITUACAONFIPI, A.TIPDOCFISCAL )
-              end  as M014_DM_ST_TRIB_IPI,
+              end 
+              END  as M014_DM_ST_TRIB_IPI,
                ( CASE WHEN fmlf_validanfedeajuste(vnCodGeralOper) = 1 THEN
                            0
                       WHEN nvl(a.indqtdzeradanfcompl, 'N') = 'S' THEN
@@ -1695,11 +1979,11 @@ BEGIN
                       ELSE
                            nvl(a.vlrunitariodev * (case vsIndIipoEmbDanfeClie
                                                 when 'M' then fminembfamilia(B.SEQFAMILIA)
-                                                when 'V' then FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, A.NROSEGMENTO)
+                                                when 'V' then FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, NVL(A.NROSEGITEM, A.NROSEGMENTO))
                                                 else  A.QTDEMBALAGEM end),
                                 decode( nvl(a.VlrUnitarioECF, 0), 0, fc5_RetVlrUnitNfe(A.SEQNOTAFISCAL, A.SEQPRODUTO, (case vsIndIipoEmbDanfeClie
                                                                                                        when 'M' then fminembfamilia(B.SEQFAMILIA)
-                                                                                                       when 'V' then FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, A.NROSEGMENTO)
+                                                                                                       when 'V' then FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, NVL(A.NROSEGITEM, A.NROSEGMENTO))
                                                                                                        else  A.QTDEMBALAGEM end) ,
                                                       a.VLRPRODBRUTO, (a.VLRDESCONTO -  DECODE(A.INDSUBTRAIICMSDESONTOTITEM, 'S', decode(a.VLRTOTICMSDESONITEMSUBTRAI,0,a.vlrdescicms,a.VLRTOTICMSDESONITEMSUBTRAI), 0)), A.VLRDESCSF,
                                                       A.QUANTIDADE, A.INDUSAPRECOFIXO, vsGERA_ITEM_LIQ_DESC, vsPDConsidVlrDescEspecialItem, a.tipotabela, a.tipotabvenda,a.vlracrescimo),
@@ -1726,7 +2010,7 @@ BEGIN
              (case
                    WHEN fmlf_validanfedeajuste(vnCodGeralOper) = 1 OR nvl(indqtdzeradanfcompl, 'N') = 'S' THEN '0'
                    when vsIndIipoEmbDanfeClie = 'M' then fDescEmbFamilia(B.SEQFAMILIA,fminembfamilia(B.SEQFAMILIA))
-                   when vsIndIipoEmbDanfeClie = 'V' then fDescEmbFamilia(B.SEQFAMILIA,FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, A.NROSEGMENTO))
+                   when vsIndIipoEmbDanfeClie = 'V' then fDescEmbFamilia(B.SEQFAMILIA,FMinEmbVendaFamiliaAtiva(B.SEQPRODUTO, A.NROEMPRESA, NVL(A.NROSEGITEM, A.NROSEGMENTO)))
                    when vsIndIipoEmbDanfeClie = 'C' then D.EMBALAGEM
                    else  D.EMBALAGEM || SUBSTR(A.QTDEMBALAGEM, 1, 4) end)  as M014_DS_UNID_COM,
               (
@@ -2003,18 +2287,24 @@ BEGIN
                  0
               end
               -
-              case when a.nrodeclaraimport is not null then
+              case when a.nrodeclaraimport is not null
+                and (vsPDConsid_Imp_VlrOutras = 'T' OR ( vsPDConsid_Imp_VlrOutras = 'M' and a.apporigem in (35))) then
                 (nvl(a.vlrpis, 0) + nvl(a.vlrcofins, 0) + nvl(a.vlrimpimportexport, 0))
               else
                 0
               end
               -
-              case when a.nrodeclaraimport is not null and vsPDCalcBaseIcmsAFRMM = 'S' AND NVL(A.INDCOMPLVLRIMP, 'X') = 'N' THEN
-                -- (nvl(a.vlrafrmm, 0) / (select count(1) from mlf_nfitem c where c.seqnf = a.seqnf)) < Nao estava deduzindo o AFRMM rateado da forma correta
-                 NVL(NAGF_AFRMM_RATEADO(A.nrodeclaraimport, A.SEQPRODUTO),0)
+              case when a.nrodeclaraimport is not null and vsPDCalcBaseIcmsAFRMM = 'S'
+                and (vsPDConsid_Imp_VlrOutras = 'T' OR ( vsPDConsid_Imp_VlrOutras = 'M' and a.apporigem in (35))) then
+                 fRateiaAFRMM(a.nroadicaodi, a.nrodeclaraimport, a.seqproduto)
               else
                   0
-              end as M014_VL_OUTRAS_DESPESAS,
+              end 
+              -- Giuliano 06/05/26
+              - 
+              CASE WHEN nvl(a.vlrfreteitemrateio, 0) > 0 THEN NAGF_SUBTRAI_DESP_CENT_ECOMM(NVL(A.VLRDESPACESSORIA,0), A.APPORIGEM, A.CODGERALOPER) ELSE 0 END
+              --
+              as M014_VL_OUTRAS_DESPESAS,
               case
                 when FMAP_FAMILIAFINALIDADE(B.SEQFAMILIA, A.NROEMPRESA) in ('F', 'G', 'D') or
                      A.SEQITEMDF >= 990 then 0
@@ -2157,7 +2447,7 @@ BEGIN
               end as M014_VL_ICMS_OPPROPRIAC5,
               a.vlrdescicms,
               c.papelimune,
-	            A.PERACRESCST,
+              A.PERACRESCST,
               case when vsPDGeraCestGenerico = 'S' and a.codcest is null and A.situacaonf in ('060','090') then '9999999'
               else lpad(a.codcest,7,0)
               end,
@@ -2227,7 +2517,7 @@ BEGIN
               A.PERALIQFCPDISTRIB,
               A.VLRFCPDISTRIB,
               A.BASCALCFECPPARTILHA,
-              fc5_BuscaCodAjusteEFD(A.CODAJUSTEEFD,'N') AS CODAJUSTEEFD,
+              fc5_BuscaCodAjusteEFD(A.CODAJUSTEEFD) AS CODAJUSTEEFD,
               A.PERREDBCICMSEFET,
               A.VLRBASEICMSEFET,
               A.PERALIQICMSEFET,
@@ -2243,7 +2533,7 @@ BEGIN
                                A.SEQPRODUTO,
                                DECODE(vsIndIipoEmbDanfeClie,
                                             'M', fminembfamilia(B.SEQFAMILIA),
-                                            'V', fminembvendafamiliaativa(B.SEQPRODUTO, A.NROEMPRESA, A.NROSEGMENTO), A.QTDEMBALAGEM),
+                                            'V', fminembvendafamiliaativa(B.SEQPRODUTO, A.NROEMPRESA, NVL(A.NROSEGITEM, A.NROSEGMENTO)), A.QTDEMBALAGEM),
                                'N',
                                'B') AS M014_CD_CBARRA,
               fc5_NFeCodAcesso(A.NROEMPRESA, A.SEQPRODUTO, A.QTDEMBALAGEM, 'S', 'B') AS M014_CD_CBARRA_TRIB,
@@ -2268,7 +2558,155 @@ BEGIN
               NVL(A.PERICMSPRESUMIDO,0) AS M014_ALIQ_CRED_PRESUMIDO,
               A.VLRICMSPRESUMIDO AS M014_VL_CRED_PRESUMIDO,
               fc5_BuscaCodAjusteEFD(A.CODAJUSTEEFD,'D') AS M014_CD_BENEF_RBC,
-              DECODE(DECODE(NVL(C.INDDEDUZICMSDESONERADO,'C'),'C',vsPDSubtraiICMSDesonTotItem,C.INDDEDUZICMSDESONERADO),'S','1','0') AS M014_DM_DEDUZ_DESON
+              DECODE(DECODE(NVL(C.INDDEDUZICMSDESONERADO,'C'),'C',vsPDSubtraiICMSDesonTotItem,C.INDDEDUZICMSDESONERADO),'S','1','0') AS M014_DM_DEDUZ_DESON,
+              --Reforma
+              NULL AS M014_TP_INDBEMMOVELUSADO,
+              decode(vsGERA_ITEM_LIQ_DESC|| A.INDUSAPRECOFIXO,'SN', A.VLRPRODBRUTO
+                                                                  - a.VLRDESCONTO
+                                                                  + decode(vsPDConsidVlrDescEspecialItem, 'S', 0, nvl( a.vlrdescsf, 0 ) )
+                                                                  + DECODE(a.INDSUBTRAIICMSDESONTOTITEM, 'S', decode(a.VLRTOTICMSDESONITEMSUBTRAI,0,a.vlrdescicms,a.VLRTOTICMSDESONITEMSUBTRAI), 0)
+                                                                  ,A.VLRPRODBRUTO - DECODE(vsPDConsidVlrDescEspecialItem, 'S', nvl( a.vlrdescsf, 0 ), 0 ) ) +
+              CASE WHEN NVL(vsIndConsideraImposto, 'N') = 'S'
+                   THEN NVL(A.VLRIMPOSTOIS,0) + NVL(A.VLRIMPOSTOIBSUF,0) + NVL(A.VLRIMPOSTOIBSMUN,0) + NVL(A.VLRIMPOSTOCBS,0)
+                   ELSE 0
+              END AS M014_VL_VLRITEM,
+              --Is
+              A.CSTIS AS M014_CD_CSTIS,
+              A.CCLASSTRIBIS AS M014_DS_CCLASSTRIBIS,
+              A.VLRBASEIS AS M014_VL_VLRBASEIS,
+              A.PERALIQIS AS M014_VL_PERALIQIS,
+              A.PERALIQEFETIVAIS AS M014_VL_PERALIQEUNIS,
+              A.VLRIMPOSTOIS AS M014_VL_VLRIMPOSTOIS,
+              (case
+                    WHEN fmlf_validanfedeajuste(vnCodGeralOper) = 1 OR nvl(a.indqtdzeradanfcompl, 'N') = 'S' THEN
+                         '0'
+                    when (vsIndConvEmbNFe = 'S' or fConvertEmbComercioExterior(vsIndConvEmbNFe, vnEntradaSaida, vsUfDestino, A.CFOP ) = 1) and D.EMBCONVNFE is not null and D.FATORCONVEMBNFE is not null then
+                         D.EMBCONVNFE
+                    when vsPDVersaoXml = '4'
+                      and b.codigoanp in (210203001, 210203003, 210203004, 210203005, 420102004, 420102005,
+                                          420105001, 420201001, 420201003, 420301002, 820101001, 820101012,
+                                          820101013, 820101033, 820101034, 320101001, 320101002, 320102001,
+                                          320102002, 320102003, 320102005, 320201001, 810102001, 810102004,
+                                          810102003, 320103001, 320103003, 320301002, 320301001, 320103002)
+                      then
+                         D.EMBALAGEM -- atualmente deve ser sempre configurado como "KG"
+                    else
+                         D.EMBALAGEM || SUBSTR(A.QTDEMBALAGEM, 1, 4) END
+              ) AS M014_DS_UNTRIBIS,
+              (case
+                    WHEN fmlf_validanfedeajuste(vnCodGeralOper) = 1 OR nvl(a.indqtdzeradanfcompl, 'N') = 'S' THEN
+                         0
+                    when (vsIndConvEmbNFe = 'S' or fConvertEmbComercioExterior(vsIndConvEmbNFe, vnEntradaSaida, vsUfDestino, A.CFOP ) = 1) and D.EMBCONVNFE is not null and D.FATORCONVEMBNFE is not null then
+                         (A.QUANTIDADE/A.QTDEMBALAGEM)*D.FATORCONVEMBNFE
+                    else
+                         (A.QUANTIDADE/A.QTDEMBALAGEM)
+               END
+               ) AS M014_VL_QTDTRIBIS,
+              --Ibs
+              NVL(A.VLRIMPOSTOIBSUF,0) + NVL(A.VLRIMPOSTOIBSMUN,0) AS M014_VL_VLRIMPOSTOIBS,
+              --Ibs Uf
+              A.CSTIBSUF AS M014_CD_CSTIBSUF,
+              A.CCLASSTRIBIBSUF AS M014_DS_CCLASSTRIBIBSUF,
+              A.VLRBASEIBSUF AS M014_VL_VLRBASEIBSUF,
+              A.PERALIQIBSUF AS M014_VL_PERALIQIBSUF,
+              A.VLRIMPOSTOIBSUF AS M014_VL_VLRIMPOSTOIBSUF,
+              A.PERDIFERIMENTOIBSUF AS M014_VL_PERDIFERIDOIBSUF,
+              A.VLRDIFERIDOIBSUF AS M014_VL_VLRDIFERIDOIBSUF,
+              NULL AS M014_VL_VLRDEVTRIBIBSUF,
+              A.PERALIQREDIBSUF AS M014_VL_PERALIQREDIBSUF,
+              A.PERALIQEFETIVAIBSUF AS M014_VL_PERALIQEFETIVAIBSUF,
+              A.CSTREGULARIBSUF AS M014_CD_CSTREGULARIBSUF,
+              A.CCLASSTRIBREGULARIBSUF AS M014_DS_CCLASSTRIBREGULARIBSUF,
+              A.PERALIQREGULARIBSUF AS M014_VL_PERALIQREGULARIBSUF,
+              A.VLRIMPOSTOREGULARIBSUF AS M014_VL_VLRIMPOSTOREGULARIBSUF,
+              A.VLRBASECCREDPRESIBSUF AS M014_VL_VLRBASECCREDPRESIBSUF,
+              A.CCREDPRESIBSUF AS M014_CD_CCREDPRESIBSUF,
+              A.PERALIQCCREDPRESIBSUF AS M014_VL_PERALIQCCREDPRESIBSUF,
+              A.VLRCCREDPRESIBSUF AS M014_VL_VLRCCREDPRESIBSUF,
+              NULL AS M014_VL_VLRCCREDPRESCONDSUSIBSUF,
+              NULL AS M014_VL_PERALIQCOMPRAGOVIBSUF,
+              NULL AS M014_VL_VLRIMPOSTOCOMPRAGOVIBSUF,
+              CASE WHEN LPAD(A.CSTIBSUF,3,0) IN ('800') THEN A.VLRIMPOSTOIBSUF END AS M014_VL_VLRIMPOSTOTRANSFERIDOIBS,
+              NULL AS M000_TP_INDCREDPRESZFMIBS,
+              NULL AS M014_VL_VLRCCREDPRESZFMIBS,
+              -- Ibs Mun
+              A.CSTIBSMUN AS M014_CD_CSTIBSMUN,
+              A.CCLASSTRIBIBSMUN AS M014_DS_CCLASSTRIBIBSMUN,
+              A.VLRBASEIBSMUN AS M014_VL_VLRBASEIBSMUN,
+              A.PERALIQIBSMUN AS M014_VL_PERALIQIBSMUN,
+              A.VLRIMPOSTOIBSMUN AS M014_VL_VLRIMPOSTOIBSMUN,
+              A.PERDIFERIMENTOIBSMUN AS M014_VL_PERDIFERIDOIBSMUN,
+              A.VLRDIFERIDOIBSMUN AS M014_VL_VLRDIFERIDOIBSMUN,
+              NULL AS M014_VL_VLRDEVTRIBIBSMUN,
+              A.PERALIQREDIBSMUN AS M014_VL_PERALIQREDIBSMUN,
+              A.PERALIQEFETIVAIBSMUN AS M014_VL_PERALIQEFETIVAIBSMUN,
+              A.CSTREGULARIBSMUN AS M014_CD_CSTREGULARIBSMUN,
+              A.CCLASSTRIBREGULARIBSMUN AS M014_DS_CCLASSTRIBREGULARIBSMUN,
+              A.PERALIQREGULARIBSMUN AS M014_VL_PERALIQREGULARIBSMUN,
+              A.VLRIMPOSTOREGULARIBSMUN AS M014_VL_VLRIMPOSTOREGULARIBSMUN,
+              NULL AS M014_VL_PERALIQCOMPRAGOVIBSMUN,
+              NULL AS M014_VL_VLRIMPOSTOCOMPRAGOVIBSMUN,
+              -- Cbs
+              A.CSTCBS AS M014_CD_CSTCBS,
+              A.CCLASSTRIBCBS AS M014_DS_CCLASSTRIBCBS,
+              A.VLRBASECBS AS M014_VL_VLRBASECBS,
+              A.PERALIQCBS AS M014_VL_PERALIQCBS,
+              A.VLRIMPOSTOCBS AS M014_VL_VLRIMPOSTOCBS,
+              A.PERDIFERIMENTOCBS AS M014_VL_PERDIFERIMENTOCBS,
+              A.VLRIMPOSTOINTEGRALCBS AS M014_VL_VLRIMPOSTOBRUTOCBS,
+              A.VLRDIFERIDOCBS AS M014_VL_VLRDIFERIDOCBS,
+              NULL AS M014_VL_VLRDEVTRIBCBS,
+              A.PERALIQREDCBS AS M014_VL_PERALIQREDCBS,
+              A.PERALIQEFETIVACBS AS M014_VL_PERALIQEFETIVACBS,
+              A.CSTREGULARCBS AS M014_CD_CSTREGULARCBS,
+              A.CCLASSTRIBREGULARCBS AS M014_DS_CCLASSTRIBREGULARCBS,
+              A.PERALIQREGULARCBS AS M014_VL_PERALIQREGULARCBS,
+              A.VLRIMPOSTOREGULARCBS AS M014_VL_VLRIMPOSTOREGULARCBS,
+              A.VLRBASECCREDPRESCBS AS M014_VL_VLRBASECCREDPRESCBS,
+              A.CCREDPRESCBS AS M014_CD_CCREDPRESCBS,
+              A.PERALIQCCREDPRESCBS AS M014_VL_PERALIQCCREDPRESCBS,
+              A.VLRCCREDPRESCBS AS M014_VL_VLRCCREDPRESCBS,
+              NULL AS M014_VL_VLRCCREDPRESCONDSUSCBS,
+              NULL AS M014_VL_PERALIQCOMPRAGOVCBS,
+              NULL AS M014_VL_VLRIMPOSTOCOMPRAGOVCBS,
+              CASE WHEN LPAD(A.CSTCBS,3,0) IN ('800') THEN A.VLRIMPOSTOCBS END AS M014_VL_VLRIMPOSTOTRANSFERIDOCBS,
+              -- Reforma Mono
+              NULL AS M014_VL_QTDE_TRIB_MONO,
+              NULL AS M014_VL_PERALIQADREMIBS,
+              NULL AS M014_VL_PERALIQADREMCBS,
+              NULL AS M014_VL_VLRIMPOSTOMONOIBS,
+              NULL AS M014_VL_VLRIMPOSTOMONOCBS,
+              NVL(VLRIMPOSTOMONORETIBSUF,0) AS M014_VL_VLRIMPOSTOINTEGRALMONOIBS,
+              NVL(VLRIMPOSTOMONORETCBS,0) AS M014_VL_VLRIMPOSTOINTEGRALMONOCBS,
+              NULL AS M014_VL_QTDE_TRIB_MONORETENIBS,
+              NULL AS M014_VL_PERALIQMONORETENIBS,
+              NULL AS M014_VL_VLRIMPOSTOMONORETENIBS,
+              NULL AS M014_VL_PERALIQMONORETENCBS,
+              NULL AS M014_VL_VLRIMPOSTOMONORETENCBS,
+              A.VLRBASEMONORETIBSUF AS M014_VL_QTDE_TRIB_MONORETIBS,
+              A.PERALIQMONORETIBSUF AS M014_VL_PERALIQMONORETIBS,
+              A.VLRIMPOSTOMONORETIBSUF AS M014_VL_VLRIMPOSTOMONORETIBS,
+              A.PERALIQMONORETCBS AS M014_VL_PERALIQMONORETCBS,
+              A.VLRIMPOSTOMONORETCBS AS M014_VL_VLRIMPOSTOMONORETCBS,
+              NULL AS M014_VL_PERDIFERIMENTOMONOIBS,
+              NULL AS M014_VL_VLRDIFERIDOMONOIBS,
+              NULL AS M014_VL_PERDIFERIMENTOMONOCBS,
+              NULL AS M014_VL_VLRDIFERIDOMONOCBS,
+              -- Doc Ref
+              -- Giuliano 18/06/26 Adicionado AppOrigem 22
+              CASE WHEN vnAppOrigem IN (40,22) THEN A.nfreferencianfechaveacesso END AS M014_DS_CHAVEACESSOREF,
+              CASE WHEN vnAppOrigem IN (40,22) THEN A.SeqItemNfRef END AS M014_DS_NROITEMREF,
+              --Agropecuario
+              A.TIPOGUIAAGRO AS M014_TP_GUIAAGRO,
+              A.NRORECEITUARIO AS M014_NR_RECEITUARIO,
+              A.CPFRESPTECNICO AS M014_NR_CPFRESPTECNICO,
+              A.TIPOGUIATRANSITO AS M014_TP_GUIATRANSITO,
+              A.UFGUIA AS M014_UF_GUIA,
+              A.SERIEGUIA AS M014_NR_SERIEGUIA,
+              A.NROGUIA AS M014_NR_GUIA,
+              -- Reforma Estorno
+              CASE WHEN A.TIPOFINALIDADENFE = 6 AND A.INDTIPONFCREDITODEBITODET = 7 THEN NVL(A.VLRIMPOSTOIBSUF,0) + NVL(A.VLRIMPOSTOIBSMUN,0) END AS M014_VL_VLRIMPOSTOESTORNOIBS,
+              CASE WHEN A.TIPOFINALIDADENFE = 6 AND A.INDTIPONFCREDITODEBITODET = 7 THEN A.VLRIMPOSTOCBS END AS M014_VL_VLRIMPOSTOESTORNOCBS
       FROM    MFLV_BASEDFITEM  A, MAP_PRODUTO        B,
               MAP_FAMILIA      C, MAP_FAMEMBALAGEM   D,
               GE_PESSOA        E, GE_CIDADE          F,
@@ -2293,6 +2731,7 @@ BEGIN
               J.NROEMPRESA       = A.NROEMPRESA  AND
               J.SEQPRODUTO       = A.SEQPRODUTO  AND
               A.CODGERALOPERITEM = K.CODGERALOPER(+);
+              sp_AjusteOutrosAFRMM(vnSeqM000_ID_NF, vsIndImportExport, vsPDCalcBaseIcmsAFRMM, vsPDConsid_Imp_VlrOutras, vnAppOrigem);
      vnSeqNFeDuplicata := 0;
      vsRowID_TMP_SEQUENCE := null;
      if nvl(vsPDGeraDuplicata, 'S') = 'S' OR nvl(vsPDGeraDuplicata, 'S') = 'C'  then
@@ -2546,7 +2985,7 @@ BEGIN
                      AND A.CODGERALOPER = D.CODGERALOPER
                      AND B.SEQFINANCEIRO = C.SEQFINANCEIRO
                      AND C.NROFORMAPAGTO = E.NROFORMAPAGTO
-                     AND E.ESPECIEFORMAPAGTO IN ('R', 'E')
+                     AND E.ESPECIEFORMAPAGTO IN ('D', 'R', 'E', 'J')
                      AND A.SEQNOTAFISCAL = pnSeqNotaFiscal
                      AND A.APPORIGEM = 7
                      AND NVL(C.STATUSTEF, 'V') != 'C'
@@ -2628,12 +3067,23 @@ BEGIN
                      AND C.NROPEDVENDA = E.NROPEDVENDA
                      AND C.NROEMPRESA = E.NROEMPRESA
                      AND C.INDECOMMERCE = 'S'
-                     AND F.ESPECIEFORMAPAGTO IN ('R', 'E', 'J'));
+                     AND F.ESPECIEFORMAPAGTO IN ('D', 'R', 'E', 'J'));
       END IF;
       IF vsPD_ConcatNfRefObsNF = 'S' or (vsPD_ConcatNfRefObsNF = 'N' and (vnAppOrigem != 2 OR vsTipoDoctoFiscal = 'D')) THEN
           if  vsSoftwarePDV = 'OPHOSNFE' then
               vnSeqM013_ID_CHAVE_REF := fBuscaSeqTmpOphus('TMP_M013_CHAVE_REF');
           end if;
+          BEGIN
+            SELECT NVL(CASE WHEN MAX(I.M014_DS_CHAVEACESSOREF) is not null AND MAX(I.M014_DS_NROITEMREF) is not null
+                        THEN 'S'
+                        ELSE 'N'
+                        END,'N')
+              INTO vsGeraNFRefDetItem
+              FROM TMP_M014_ITEM I
+             WHERE I.M000_ID_NF = pnSeqNotaFiscal;
+          EXCEPTION WHEN OTHERS THEN
+            vsGeraNFRefDetItem := 'N';
+          END;
           INSERT INTO TMP_M013_CHAVE_REF(
                  M013_ID_CHAVE_REF,
                  M013_NR_CNPJ,
@@ -2697,7 +3147,11 @@ BEGIN
                    else null
                  end as M013_NR_COO
             FROM MFLV_BASENFREF_NFE A
-           WHERE A.M000_ID_NF = pnSeqNotaFiscal;
+           WHERE A.M000_ID_NF = pnSeqNotaFiscal
+             AND ((nvl(vnIndTipoFinalidadeNfe, 0) = 5 and nvl(vnIndTipoNfCreditoDebitodet, 0) in (1, 3, 4))
+                   or (nvl(vnIndTipoFinalidadeNfe, 0) = 6 and  nvl(vnIndTipoNfCreditoDebitodet, 0) not in (3, 4) and vsGeraNFRefDetItem = 'N')
+                   or (vnAppOrigem = 40 and vsGeraNFRefDetItem = 'N')
+                   or (vnAppOrigem != 40 or vnAppOrigem is null));
       END IF;
       INSERT INTO TMP_M006_TRANSPORTE(
               M000_ID_NF, M006_VL_BC_RET_ICMS, M006_VL_ALIQ_RET,
@@ -3034,7 +3488,7 @@ BEGIN
                         when vsIndIipoEmbDanfeClie = 'M' then
                               NVL((X.QUANTIDADE / fminembfamilia(B.SEQFAMILIA)), nvl(l.quantidade, E.M014_VL_QTDE_COM))
                         when vsIndIipoEmbDanfeClie = 'V' then
-                              NVL((X.QUANTIDADE / FMinEmbVendaFamiliaAtiva( A.SEQPRODUTO,A.NROEMPRESA,A.NROSEGMENTO ) ), nvl(l.quantidade, E.M014_VL_QTDE_COM))
+                              NVL((X.QUANTIDADE / FMinEmbVendaFamiliaAtiva( A.SEQPRODUTO,A.NROEMPRESA,NVL(A.NROSEGITEM, A.NROSEGMENTO) ) ), nvl(l.quantidade, E.M014_VL_QTDE_COM))
                       else
                               NVL((X.QUANTIDADE / X.QTDEMBALAGEM), nvl(l.quantidade, E.M014_VL_QTDE_COM))
                       end as M017_VL_QTD_LOTE,
@@ -3106,7 +3560,7 @@ BEGIN
                         when vsIndIipoEmbDanfeClie = 'M' then
                               NVL((X.QUANTIDADE / fminembfamilia(B.SEQFAMILIA)), nvl(l.quantidade, E.M014_VL_QTDE_COM))
                         when vsIndIipoEmbDanfeClie = 'V' then
-                              NVL((X.QUANTIDADE / FMinEmbVendaFamiliaAtiva( A.SEQPRODUTO,A.NROEMPRESA,A.NROSEGMENTO ) ), nvl(l.quantidade, E.M014_VL_QTDE_COM))
+                              NVL((X.QUANTIDADE / FMinEmbVendaFamiliaAtiva( A.SEQPRODUTO,A.NROEMPRESA,NVL(A.NROSEGITEM, A.NROSEGMENTO) ) ), nvl(l.quantidade, E.M014_VL_QTDE_COM))
                       else
                               NVL((X.QUANTIDADE / X.QTDEMBALAGEM), nvl(l.quantidade, E.M014_VL_QTDE_COM))
                       end as M017_VL_QTD_LOTE,
