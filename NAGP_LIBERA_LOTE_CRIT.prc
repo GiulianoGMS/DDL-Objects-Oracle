@@ -1,0 +1,17 @@
+CREATE OR REPLACE PROCEDURE NAGP_LIBERA_LOTE_CRIT (psSeqGerCompra NUMBER)
+
+  IS
+  
+  psUsuarioLiberacao VARCHAR2(4000);
+  
+  BEGIN
+    
+  SELECT SYS_CONTEXT ('USERENV','CLIENT_IDENTIFIER')
+    INTO psUsuarioLiberacao
+    FROM DUAL;
+    
+  INSERT INTO NAGT_LOTE_LIBERADO_CRIT VALUES (psSeqGerCompra, SYSDATE, psUsuarioLiberacao);
+  
+  COMMIT;
+  
+  END;
