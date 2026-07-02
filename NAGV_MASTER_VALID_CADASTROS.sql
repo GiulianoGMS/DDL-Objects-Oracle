@@ -22,7 +22,8 @@ SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/
        CASE WHEN INC18 IS NOT NULL THEN ' | '||INC18 ELSE NULL END||
        CASE WHEN INC19 IS NOT NULL THEN ' | '||INC19 ELSE NULL END||
        CASE WHEN INC20 IS NOT NULL THEN ' | '||INC20 ELSE NULL END||
-       CASE WHEN INC21 IS NOT NULL THEN ' | '||INC21 ELSE NULL END
+       CASE WHEN INC21 IS NOT NULL THEN ' | '||INC21 ELSE NULL END||
+       CASE WHEN INC22 IS NOT NULL THEN ' | '||INC22 ELSE NULL END
        INCONSISTENCIAS
   FROM (
 
@@ -168,7 +169,7 @@ SELECT SEQPRODUTO, MP.SEQFAMILIA, DESCCOMPLETA,
                                         FROM MAP_TRIBUTACAOUF XC
                                        WHERE 1=1
                                          AND XC.TIPTRIBUTACAO = 'SC'
-                                         AND XC.SITUACAONF NOT IN ('060', '090')) XC ON XC.UFEMPRESA = X.UFEMPRESA
+                                         AND XC.SITUACAONF NOT IN ('060', '061', '090')) XC ON XC.UFEMPRESA = X.UFEMPRESA
                                                                        AND XC.UFEMPRESA = XC.UFCLIENTEFORNEC
                                                                        AND XC.NROREGTRIBUTACAO = X.NROREGTRIBUTACAO
                                                                        AND XC.NROTRIBUTACAO = X.NROTRIBUTACAO
@@ -182,7 +183,7 @@ SELECT SEQPRODUTO, MP.SEQFAMILIA, DESCCOMPLETA,
                       AND NVL(X.PERTRIBUTST,0)   > 0
 
                    AND MF.SEQFAMILIA = MP.SEQFAMILIA)
-         THEN 'Prod com Parametros ST e CST Diferente de 060, 090 na tributação' END               INC14,
+         THEN 'Prod com Parametros ST e CST Diferente de 060, 061 ou 090 na tributação' END               INC14,
          CASE WHEN EXISTS(
          SELECT 1 FROM MAP_FAMILIA MF INNER JOIN MAP_FAMDIVISAO FD ON FD.SEQFAMILIA = MF.SEQFAMILIA
                                        INNER JOIN MAP_TRIBUTACAOUF X ON X.NROTRIBUTACAO = FD.NROTRIBUTACAO
@@ -256,8 +257,7 @@ SELECT SEQPRODUTO, MP.SEQFAMILIA, DESCCOMPLETA,
                    AND FD.NROTRIBUTACAO NOT IN (1,1187)
             )
           THEN 'Familia/Trib sem cBenef parametrizado - Trib: '||FD.NROTRIBUTACAO END INC20,
-       -- 715679   
-       CASE WHEN EXISTS (
+          CASE WHEN EXISTS (
                           SELECT 1
                             FROM MAP_TRIBUTACAOUF X
                            WHERE X.UFCLIENTEFORNEC = X.UFEMPRESA
@@ -269,12 +269,25 @@ SELECT SEQPRODUTO, MP.SEQFAMILIA, DESCCOMPLETA,
                              AND X.BASEFCPICMS != X.PERTRIBUTADO
                              AND X.NROTRIBUTACAO = FD.NROTRIBUTACAO
             )
-          THEN 'Perc Base FCP Diferente do Perc Tributado! Trib: '||FD.NROTRIBUTACAO END INC21
+          THEN 'Perc Base FCP Diferente do Perc Tributado! Trib: '||FD.NROTRIBUTACAO END INC21,
+          CASE WHEN EXISTS (
+          SELECT 1 FROM MAP_TRIBUTACAOUF T WHERE T.NROTRIBUTACAO = FD.NROTRIBUTACAO AND RPAD(T.SITUACAONF,3,0) IN ('020','030','040','041','051')
+                                                                                    AND UFEMPRESA IN ('SP','RJ')
+                                                                                    AND UFCLIENTEFORNEC != UFEMPRESA
+                                                                                    AND UFCLIENTEFORNEC IN ('SP','RJ')
+                                                                                    AND T.TIPTRIBUTACAO = 'SC'
+                                                                                    AND T.NROREGTRIBUTACAO = 0
+                 AND (NVL(T.INDCALCICMSDESONOUTROS, 'N') = 'N'
+                   OR T.CODAJUSTEINFAD IS NULL
+                   OR T.MOTIVODESONERACAO IS NULL)
+                   AND FD.NROTRIBUTACAO NOT IN (1,1187)
+            )
+          THEN 'Familia/Trib sem cBenef parametrizado (Interestadual) - Trib: '||FD.NROTRIBUTACAO END INC22
 
   FROM MAP_PRODUTO MP INNER JOIN MAP_FAMDIVISAO FD ON FD.SEQFAMILIA = MP.SEQFAMILIA
  WHERE FD.FINALIDADEFAMILIA NOT IN ('P') -- Solicitado Dani em 27/01/25 -- Remover MP
 
   ) vMaster WHERE COALESCE(INC1,  INC2,  INC3,  INC4,  INC5,  INC6,
                            INC7,  INC8,  INC9,  INC10, INC11, INC12,
-                           INC13, INC14, INC15, INC16, INC17, INC18, INC19, INC20, INC21) IS NOT NULL
+                           INC13, INC14, INC15, INC16, INC17, INC18, INC19, INC20, INC21, INC22) IS NOT NULL
 ;
