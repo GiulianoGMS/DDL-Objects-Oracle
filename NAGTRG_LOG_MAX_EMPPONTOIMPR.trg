@@ -1,0 +1,149 @@
+-- Log alteracoes ponto de impressao
+
+CREATE TABLE NAGT_MAX_EMPPONTOIMPR_LOG (
+    IDLOG               NUMBER GENERATED ALWAYS AS IDENTITY,
+    OPERACAO            CHAR(1),
+    DATALOG             DATE,
+    USUARIO_BD          VARCHAR2(30),
+    OS_USER             VARCHAR2(100),
+    MACHINE             VARCHAR2(100),
+    MODULE              VARCHAR2(100),
+
+    NROEMPRESA_OLD      NUMBER,
+    NROEMPRESA_NEW      NUMBER,
+
+    DESCRICAO_OLD       VARCHAR2(200),
+    DESCRICAO_NEW       VARCHAR2(200),
+
+    NROFORMULARIO_OLD   NUMBER,
+    NROFORMULARIO_NEW   NUMBER,
+
+    NROSELOFISCAL_OLD   NUMBER,
+    NROSELOFISCAL_NEW   NUMBER,
+
+    SERIESELOFISCAL_OLD VARCHAR2(20),
+    SERIESELOFISCAL_NEW VARCHAR2(20),
+
+    NOMEIMP_OLD         VARCHAR2(100),
+    NOMEIMP_NEW         VARCHAR2(100),
+
+    DRIVERIMP_OLD       VARCHAR2(100),
+    DRIVERIMP_NEW       VARCHAR2(100),
+
+    PORTAIMP_OLD        VARCHAR2(100),
+    PORTAIMP_NEW        VARCHAR2(100),
+
+    NOMEJOBNFE_OLD      VARCHAR2(100),
+    NOMEJOBNFE_NEW      VARCHAR2(100),
+
+    STATUS_OLD          VARCHAR2(20),
+    STATUS_NEW          VARCHAR2(20),
+
+    TIPOJOB_OLD         VARCHAR2(20),
+    TIPOJOB_NEW         VARCHAR2(20)
+);
+
+CREATE OR REPLACE TRIGGER NAGTRG_LOG_MAX_EMPPONTOIMPR
+  AFTER INSERT OR UPDATE OR DELETE
+   ON MAX_EMPPONTOIMPR
+FOR EACH ROW
+  
+DECLARE
+    v_operacao CHAR(1);
+BEGIN
+
+    IF INSERTING THEN
+        v_operacao := 'I';
+    ELSIF UPDATING THEN
+        v_operacao := 'U';
+    ELSE
+        v_operacao := 'D';
+    END IF;
+
+    INSERT INTO NAGT_MAX_EMPPONTOIMPR_LOG
+    (
+        OPERACAO,
+        DATALOG,
+        USUARIO_BD,
+        OS_USER,
+        MACHINE,
+        MODULE,
+
+        NROEMPRESA_OLD,
+        NROEMPRESA_NEW,
+
+        DESCRICAO_OLD,
+        DESCRICAO_NEW,
+
+        NROFORMULARIO_OLD,
+        NROFORMULARIO_NEW,
+
+        NROSELOFISCAL_OLD,
+        NROSELOFISCAL_NEW,
+
+        SERIESELOFISCAL_OLD,
+        SERIESELOFISCAL_NEW,
+
+        NOMEIMP_OLD,
+        NOMEIMP_NEW,
+
+        DRIVERIMP_OLD,
+        DRIVERIMP_NEW,
+
+        PORTAIMP_OLD,
+        PORTAIMP_NEW,
+
+        NOMEJOBNFE_OLD,
+        NOMEJOBNFE_NEW,
+
+        STATUS_OLD,
+        STATUS_NEW,
+
+        TIPOJOB_OLD,
+        TIPOJOB_NEW
+    )
+    VALUES
+    (
+       v_operacao,
+
+        SYSDATE,
+        USER,
+        SYS_CONTEXT('USERENV','OS_USER'),
+        SYS_CONTEXT('USERENV','HOST'),
+        SYS_CONTEXT('USERENV','MODULE'),
+
+        :OLD.NROEMPRESA,
+        :NEW.NROEMPRESA,
+
+        :OLD.DESCRICAO,
+        :NEW.DESCRICAO,
+
+        :OLD.NROFORMULARIO,
+        :NEW.NROFORMULARIO,
+
+        :OLD.NROSELOFISCAL,
+        :NEW.NROSELOFISCAL,
+
+        :OLD.SERIESELOFISCAL,
+        :NEW.SERIESELOFISCAL,
+
+        :OLD.NOMEIMP,
+        :NEW.NOMEIMP,
+
+        :OLD.DRIVERIMP,
+        :NEW.DRIVERIMP,
+
+        :OLD.PORTAIMP,
+        :NEW.PORTAIMP,
+
+        :OLD.NOMEJOBNFE,
+        :NEW.NOMEJOBNFE,
+
+        :OLD.STATUS,
+        :NEW.STATUS,
+
+        :OLD.TIPOJOB,
+        :NEW.TIPOJOB
+    );
+
+END;
