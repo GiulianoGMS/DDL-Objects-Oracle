@@ -5,28 +5,37 @@ CREATE OR REPLACE PROCEDURE NAGP_MN_ENCARTE (psSeqEncarte  NUMBER,
 BEGIN
   
   DECLARE codErro VARCHAR2(100);
-             vSQL VARCHAR2(3000);
+       vSeqPromoc NUMBER(27);
   
   BEGIN
     
   ---////////// LOOP Segmento
   ---////////// Loop para gerar a Promocao por Segmento ///////////
-  FOR seg IN (SELECT DISTINCT NROSEGMENTO FROM NAGV_BASE_MN_ENCARTE T 
+  FOR seg IN (SELECT DISTINCT NROSEGMENTO, DTAINICIO perINI, DTAFIM perFIM FROM NAGV_BASE_MN_ENCARTE T 
                WHERE T.SEQENCARTE = psSeqEncarte
                   -- Este not exists evita duplicidades
-                 AND NOT EXISTS(SELECT 1 FROM MFL_PROMOCAOPDV X WHERE X.DESCRICAO LIKE '%'||T.SEQENCARTE||'%'))
+                 AND NOT EXISTS(SELECT 1 FROM MFL_PROMOCAOPDV X WHERE X.DESCRICAO = T.DESC_PROMOC))
   
   LOOP
+  
+  -- Descobre o SEQ NextVal
+  -- Vai ser necessario no loop de item x loja x preco
+  SELECT S_SEQPROMOCPDV.NEXTVAL
+    INTO vSeqPromoc
+    FROM DUAL;  
+  
   ---////////// LOOP CAPA
   ---////////// Insere a capa da promocao ///////////
-  FOR capa IN (SELECT S_SEQPROMOCPDV.NEXTVAL SEQPROMOCPDV, CODPROMOCAO, DTAINICIO, DTAFIM, DESC_PROMOC, 'A' STATUS
+  FOR capa IN (SELECT vSeqPromoc SEQPROMOCPDV, CODPROMOCAO, DTAINICIO, DTAFIM, DESC_PROMOC, 'A' STATUS
                  FROM (SELECT DISTINCT SEQENCARTE CODPROMOCAO, T.DTAINICIO, T.DTAFIM, DESC_PROMOC
                          FROM NAGV_BASE_MN_ENCARTE T 
                         WHERE 1=1 
-                          AND T.SEQENCARTE = psSeqEncarte
+                          AND T.SEQENCARTE  = psSeqEncarte
                           AND T.NROSEGMENTO = seg.Nrosegmento
+                          AND T.DTAINICIO   = seg.perINI
+                          AND T.DTAFIM      = seg.perFIM
                           -- Este not exists evita duplicidades
-                          AND NOT EXISTS(SELECT 1 FROM MFL_PROMOCAOPDV X WHERE X.DESCRICAO LIKE '%'||T.SEQENCARTE||'%')))
+                          AND NOT EXISTS(SELECT 1 FROM MFL_PROMOCAOPDV X WHERE X.DESCRICAO = T.DESC_PROMOC)))
                
   LOOP
   codErro := capa.CODPROMOCAO;
@@ -56,7 +65,7 @@ BEGIN
          'I',
          'I',
          'A',
-         'N',
+         'S', -- Controla Verba PDV (Sellout)
           700);
           
   ---////////// Loop ITEM
@@ -67,12 +76,16 @@ BEGIN
    SELECT DISTINCT T.SEQFAMILIA, T.SEQPRODUTO 
                          FROM NAGV_BASE_MN_ENCARTE T INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = T.SEQPRODUTO AND psIndRepFam = 'N' AND psIndRepSim = 'N'
                         WHERE 1=1 AND T.SEQENCARTE = psSeqEncarte
+                          AND T.DTAINICIO   = seg.perINI
+                          AND T.DTAFIM      = seg.perFIM
                           AND T.NROSEGMENTO = seg.Nrosegmento
 UNION   
    -- 2.: Se estiver marcado para replicar apenas FAMILIA
    SELECT DISTINCT T.SEQFAMILIA, NVL(P.SEQPRODUTO, T.SEQPRODUTO) SEQPRODUTO
                          FROM NAGV_BASE_MN_ENCARTE T INNER JOIN MAP_PRODUTO P ON T.SEQFAMILIA = P.SEQFAMILIA AND psIndRepFam = 'S' AND psIndRepSim = 'N'
                         WHERE 1=1 AND T.SEQENCARTE = psSeqEncarte
+                          AND T.DTAINICIO   = seg.perINI
+                          AND T.DTAFIM      = seg.perFIM
                           AND T.NROSEGMENTO = seg.Nrosegmento
 
 UNION 
@@ -80,6 +93,8 @@ UNION
    SELECT DISTINCT T.SEQFAMILIA, NVL(S.SEQPRODUTO, T.SEQPRODUTO) SEQPRODUTO
                          FROM NAGV_BASE_MN_ENCARTE T INNER JOIN MAP_PRODSIMILAR S ON S.SEQSIMILARIDADE = T.SEQSIMILARIDADE AND psIndRepFam = 'N' AND psIndRepSim = 'S'
                         WHERE 1=1 AND T.SEQENCARTE = psSeqEncarte
+                          AND T.DTAINICIO   = seg.perINI
+                          AND T.DTAFIM      = seg.perFIM
                           AND T.NROSEGMENTO = seg.Nrosegmento
                         
 UNION 
@@ -89,7 +104,9 @@ UNION
                                                      INNER JOIN MAP_PRODSIMILAR S ON S.SEQPRODUTO = X.SEQPRODUTO  AND psIndRepSim = 'S'
                                                      INNER JOIN MAP_PRODSIMILAR P ON P.SEQSIMILARIDADE = S.SEQSIMILARIDADE AND 1=1
                         WHERE 1=1 AND T.SEQENCARTE = psSeqEncarte
-                          AND T.NROSEGMENTO = seg.Nrosegmento) BS )
+                          AND T.NROSEGMENTO = seg.Nrosegmento
+                          AND T.DTAINICIO   = seg.perINI
+                          AND T.DTAFIM      = seg.perFIM) BS )
   LOOP
  
   INSERT INTO MFL_PROMOCPDVITEM XI (SEQPROMOCPDV,
@@ -129,7 +146,7 @@ UNION
          
   END LOOP; -- Loop Item
     
-  ---////////// Loop ITEM e LOJA
+  ---////////// Loop ITEM e LOJA / Preco
   ---////////// Insere os itens por loja de  acordo com o codpromocao da capa ///////////
       
   FOR item_loja IN (SELECT DISTINCT T.NROEMPRESA CODLOJA, PRECO_MN, item_Base.SEQITEMPROMOC,
@@ -137,18 +154,19 @@ UNION
                            PRECOVALIDNORMAL - PRECO_MN VLRDESCONTO, 
                            ROUND(((PRECOVALIDNORMAL - T.PRECO_MN) / PRECOVALIDNORMAL) * 100 ,2) PERCDESCONTO,
                            CASE WHEN F.PESAVEL = 'S' THEN 0.01 ELSE 1 END APARTIRDE -- Pesavel insere 0.01
-                           
-                      FROM NAGV_BASE_MN_ENCARTE T INNER JOIN MAX_EMPRESA M ON M.NROEMPRESA = T.NROEMPRESA
-                                                  INNER JOIN MRL_PRODEMPSEG S ON S.NROEMPRESA = M.NROEMPRESA AND S.NROSEGMENTO = M.NROSEGMENTOPRINC AND  S.SEQPRODUTO = T.SEQPRODUTO AND S.QTDEMBALAGEM = 1
-                                                  INNER JOIN MFL_PROMOCPDVITEM item_base ON item_base.SEQPROMOCPDV = T.SEQENCARTE AND item_base.SEQPRODUTO = T.SEQPRODUTO
-                                                  INNER JOIN MAP_PRODUTO P ON P.SEQPRODUTO = T.SEQPRODUTO
-                                                  INNER JOIN MAP_FAMILIA F ON F.SEQFAMILIA = P.SEQFAMILIA
-                                                   
-                     WHERE T.SEQENCARTE = psSeqEncarte
-                       AND PRECOVALIDNORMAL > 0 
-                       -- Apenas se vlr promocao é menor que o preco normal
+                      FROM MFL_PROMOCPDVITEM item_base INNER JOIN NAGV_BASE_MN_ENCARTE T ON T.SEQFAMILIA = item_base.Seqfamilia AND psIndRepFam = 'S'
+                                                                                         OR t.SEQPRODUTO = item_base.SeqProduto AND psIndRepFam = 'N'
+                                                       INNER JOIN MAX_EMPRESA M ON M.NROEMPRESA = T.NROEMPRESA
+                                                       INNER JOIN MRL_PRODEMPSEG S ON S.NROEMPRESA = M.NROEMPRESA AND S.NROSEGMENTO = M.NROSEGMENTOPRINC AND  S.SEQPRODUTO = item_base.SEQPRODUTO AND S.QTDEMBALAGEM = 1
+                                                       INNER JOIN MAP_FAMILIA F ON F.SEQFAMILIA = item_base.SEQFAMILIA
+                                                       
+                     WHERE item_base.Seqpromocpdv = vSeqPromoc
+                       AND T.SEQENCARTE = psSeqEncarte
+                       AND PRECOVALIDNORMAL > 0
                        AND PRECO_MN < PRECOVALIDNORMAL
-                       AND T.NROSEGMENTO = seg.Nrosegmento)
+                       AND T.NROSEGMENTO = seg.NroSegmento
+                       AND T.DTAINICIO   = seg.perINI
+                       AND T.DTAFIM      = seg.perFIM)
                        
                        
   LOOP
@@ -180,10 +198,12 @@ UNION
    ---////////// Loop LOJA
    ---////////// Insere as lojas ///////////
    
-   FOR emp IN (SELECT DISTINCT SEQENCARTE CODPROMOCAO, T.NROEMPRESA CODLOJA
+   FOR emp IN (SELECT DISTINCT vSeqPromoc CODPROMOCAO, T.NROEMPRESA CODLOJA
                  FROM NAGV_BASE_MN_ENCARTE T
                 WHERE T.SEQENCARTE = psSeqEncarte
-                  AND T.NROSEGMENTO = seg.Nrosegmento)
+                  AND T.NROSEGMENTO = seg.Nrosegmento
+                  AND T.DTAINICIO   = seg.perINI
+                  AND T.DTAFIM      = seg.perFIM)
                   
    LOOP
     
@@ -205,12 +225,11 @@ UNION
    
    codErro := NULL;
    
-   COMMIT;
    END LOOP; -- Loop Capa
-   
    END LOOP; -- Loop Segmento
    
-   --COMMIT;
+   --COMMIT; -- Commit no final
+   
    EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('Promoc com Erro: ' || codErro);
