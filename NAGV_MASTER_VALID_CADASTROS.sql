@@ -23,7 +23,8 @@ SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/
        CASE WHEN INC19 IS NOT NULL THEN ' | '||INC19 ELSE NULL END||
        CASE WHEN INC20 IS NOT NULL THEN ' | '||INC20 ELSE NULL END||
        CASE WHEN INC21 IS NOT NULL THEN ' | '||INC21 ELSE NULL END||
-       CASE WHEN INC22 IS NOT NULL THEN ' | '||INC22 ELSE NULL END
+       CASE WHEN INC22 IS NOT NULL THEN ' | '||INC22 ELSE NULL END||
+       CASE WHEN INC23 IS NOT NULL THEN ' | '||INC23 ELSE NULL END
        INCONSISTENCIAS
   FROM (
 
@@ -276,18 +277,25 @@ SELECT SEQPRODUTO, MP.SEQFAMILIA, DESCCOMPLETA,
                                                                                     AND UFCLIENTEFORNEC != UFEMPRESA
                                                                                     AND UFCLIENTEFORNEC IN ('SP','RJ')
                                                                                     AND T.TIPTRIBUTACAO = 'SC'
-                                                                                    AND T.NROREGTRIBUTACAO = 0
+                                                                                    AND T.NROREGTRIBUTACAO IN (0,8)
                  AND (NVL(T.INDCALCICMSDESONOUTROS, 'N') = 'N'
                    OR T.CODAJUSTEINFAD IS NULL
                    OR T.MOTIVODESONERACAO IS NULL)
                    AND FD.NROTRIBUTACAO NOT IN (1,1187)
             )
-          THEN 'Familia/Trib sem cBenef parametrizado (Interestadual) - Trib: '||FD.NROTRIBUTACAO END INC22
+          THEN 'Familia/Trib sem cBenef parametrizado (Interestadual) - Trib: '||FD.NROTRIBUTACAO END INC22,
+          CASE WHEN EXISTS (
+          SELECT 1 FROM MAP_FAMILIA F
+           WHERE F.PERALIQUOTAIPI = 0
+             AND (F.SITUACAONFIPI IS NOT NULL OR F.SITUACAONFIPISAI != 53)
+             AND F.SEQFAMILIA = MP.SEQFAMILIA)
+          THEN 'Aliquota de IPI igual a zero - Entrada/Saida divergentes' END INC23
 
   FROM MAP_PRODUTO MP INNER JOIN MAP_FAMDIVISAO FD ON FD.SEQFAMILIA = MP.SEQFAMILIA
  WHERE FD.FINALIDADEFAMILIA NOT IN ('P') -- Solicitado Dani em 27/01/25 -- Remover MP
 
   ) vMaster WHERE COALESCE(INC1,  INC2,  INC3,  INC4,  INC5,  INC6,
                            INC7,  INC8,  INC9,  INC10, INC11, INC12,
-                           INC13, INC14, INC15, INC16, INC17, INC18, INC19, INC20, INC21, INC22) IS NOT NULL
+                           INC13, INC14, INC15, INC16, INC17, INC18, 
+                           INC19, INC20, INC21, INC22, INC23) IS NOT NULL
 ;
