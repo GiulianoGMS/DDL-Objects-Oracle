@@ -5,7 +5,8 @@ BEGIN
                     nroTituloIss  => 9958,
                     vlrISS        => 1.45,
                     vEmissao      => DATE '2024-09-10',
-                    vVencimento   => DATE '2024-11-20');
+                    vVencimento   => DATE '2024-11-20',
+                    vSeqPessoa => 1111111);
 END;
 
 E depois rodar a CONSINCO.CAFD_INTEG_TIT_FINANCEIRO
@@ -19,7 +20,8 @@ CREATE OR REPLACE PROCEDURE NAGP_INSERETITISS (nroTituloBase IN NUMBER,
                                                         nroTituloIss  IN NUMBER,
                                                         vlrISS        IN NUMBER,
                                                         vEmissao      IN DATE,
-                                                        vVencimento   IN DATE)
+                                                        vVencimento   IN DATE,
+                                                        vSeqPessoa IN NUMBER)
 
                                                AS
       -- Por Giuliano em 11/11/24
@@ -155,7 +157,7 @@ INSERT INTO CONSINCO.MRL_TITULOFIN X  (X.SEQTITULO,
 SELECT (SELECT MAX(SEQTITULO) FROM CONSINCO.MRL_TITULOFIN) + ROWNUM,
        X.NROEMPRESA,
        X.CODESPECIE,
-       X.SEQPESSOA,
+       vSeqPessoa,
        X.VERSAOPESSOA,
        X.OBRIGDIREITO,
        X.SEQAGENCIA,
@@ -277,6 +279,7 @@ SELECT (SELECT MAX(SEQTITULO) FROM CONSINCO.MRL_TITULOFIN) + ROWNUM,
        X.VLRDESCFUNRAT,
        X.VLRDESCFUNPREVSOCIAL FROM CONSINCO.MRL_TITULOFIN X WHERE NROTITULO = nroTituloBase AND CODESPECIE IN ('SERVRC','ISSQN') AND X.NROEMPRESA = nroEmpresaBase
 
-       AND NOT EXISTS (SELECT 1 FROM CONSINCO.MRL_TITULOFIN A WHERE A.NROTITULO = nroTituloIss AND A.CODESPECIE = X.CODESPECIE AND A.NROEMPRESA = nroEmpresaBase);
+       AND NOT EXISTS (SELECT 1 FROM CONSINCO.MRL_TITULOFIN A WHERE A.NROTITULO = nroTituloIss AND A.CODESPECIE = X.CODESPECIE AND A.NROEMPRESA = nroEmpresaBase AND X.NUMERONFSE = nroTituloServ);
 
 END;
+
