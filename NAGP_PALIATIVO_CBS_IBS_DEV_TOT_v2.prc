@@ -30,7 +30,7 @@ BEGIN
                                      AND C.DTALOG > SYSDATE - INTERVAL '1' HOUR - INTERVAL '10' MINUTE) 
                   AND N.DTAEMISSAO >= SYSDATE - 10
 
-      AND (SELECT COUNT(1) FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = N.SEQNF AND MOT = 'Total CBS/IBS') < 4
+      AND (SELECT COUNT(1) FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = N.SEQNF AND MOT = 'Total CBS/IBS') < 6
       
    UNION
    SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/ 
@@ -47,7 +47,7 @@ BEGIN
                                      AND C.DTALOG > SYSDATE - INTERVAL '1' HOUR - INTERVAL '10' MINUTE) 
                   AND N.DTAEMISSAO >= SYSDATE - 10
 
-      AND (SELECT COUNT(1) FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = N.SEQNF AND MOT = 'Total CBS/IBS') < 4
+      AND (SELECT COUNT(1) FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = N.SEQNF AND MOT = 'Total CBS/IBS') < 6
       )
     
   LOOP
@@ -71,8 +71,7 @@ BEGIN
         XI.SEQPRODUTO   
         
    FROM NAGV_PDV_CCT CC INNER JOIN MLF_NFITEM XI ON XI.SEQPRODUTO = CC.SEQPRODUTO
-  WHERE XI.SEQNF = rej.SEQNF
-    AND (XI.PERALIQCBS IS NULL OR XI.PERALIQIBSMUN IS NULL OR XI.PERALIQEFETIVACBS IS NULL OR 1=1))
+  WHERE XI.SEQNF = rej.SEQNF)
     
  LOOP
    
@@ -89,13 +88,33 @@ BEGIN
          XI.PERALIQREDIBSMUN   = item.PerAliqRedIBSMUN,
          XI.CSTIBSMUN          = item.CSTIBSMUN,
          XI.CCLASSTRIBIBSMUN   = item.CClassTribIBSMUN,
+         
+         --=== Aliqutoas efetivas ===--
          XI.PERALIQEFETIVACBS  = item.Peraliqefetcbs,
-         XI.PERALIQEFETIVAIBSMUN = item.Peraliqefetibsuf,
-         XI.PERALIQEFETIVAIBSUF  = item.Peraliqefetibsmun
+         XI.PERALIQEFETIVAIBSMUN = item.Peraliqefetibsmun,
+         XI.PERALIQEFETIVAIBSUF  = item.Peraliqefetibsuf,
+         
+         --=== Ajusta bases zeradas ===--
+         XI.VLRBASECBS    = NVL(XI.VLRBASECBS, XI.VLRITEM),
+         XI.VLRBASEIBSUF  = NVL(XI.VLRBASEIBSUF, XI.VLRITEM),
+         XI.VLRBASEIBSMUN = NVL(XI.VLRBASEIBSMUN, XI.VLRITEM),
+         
+         --=== Valores de impostos ===--
+         
+         XI.VLRIMPOSTOCBS = CASE WHEN XI.VLRIMPOSTOCBS IS NULL
+                            THEN ROUND(NVL(XI.VLRBASECBS, XI.VLRITEM) * (NVL(XI.PERALIQEFETIVACBS,0) / 100), 2)
+                            ELSE XI.VLRIMPOSTOCBS END,
+
+         XI.VLRIMPOSTOIBSUF = CASE WHEN XI.VLRIMPOSTOIBSUF IS NULL
+                              THEN ROUND(NVL(XI.VLRBASEIBSUF, XI.VLRITEM) * (NVL(XI.PERALIQEFETIVAIBSUF,0) / 100), 2)
+                              ELSE XI.VLRIMPOSTOIBSUF END,
+
+         XI.VLRIMPOSTOIBSMUN = CASE WHEN XI.VLRIMPOSTOIBSMUN IS NULL
+                               THEN ROUND(NVL(XI.VLRBASEIBSMUN, XI.VLRITEM) * (NVL(XI.PERALIQEFETIVAIBSMUN,0) / 100), 2)
+                               ELSE XI.VLRIMPOSTOIBSMUN END
          
    WHERE XI.SEQNF = rej.SEQNF
-     AND XI.SEQPRODUTO = item.SEQPRODUTO
-     AND (XI.PERALIQCBS IS NULL OR XI.PERALIQIBSUF IS NULL OR XI.PERALIQEFETIVACBS IS NULL);
+     AND XI.SEQPRODUTO = item.SEQPRODUTO;
   
    --======= Recalcula quando existe redução na base =======--
 
