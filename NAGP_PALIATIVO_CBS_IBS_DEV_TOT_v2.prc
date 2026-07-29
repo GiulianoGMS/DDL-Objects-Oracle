@@ -1,3 +1,11 @@
+-- Criar tabela de controle
+CREATE TABLE NAGT_PALIAT_DEV (SEQNF NUMBER(38), MOT VARCHAR2(100));
+
+-- Criar view NAGV_PDV_CCT que busca os tributos da reforma na base para tratar os itens sem impostos
+-- View em: https://github.com/GiulianoGMS/DDL-Objects-Oracle/blob/main/NAGV_PDV_CCT.sql
+
+-- Criar proc:
+
 CREATE OR REPLACE PROCEDURE NAGP_PALIATIVO_CBS_IBS_DEV_TOT_v2 IS
 
   -- Paliativo Giuliano para reforma
@@ -10,7 +18,7 @@ BEGIN
   
   SELECT TRUNC(SYSDATE) INTO psData FROM DUAL;
   
-  IF 1=1 AND psData <= DATE '2026-08-31' THEN
+  IF 1=1 AND psData <= DATE '2026-08-31' THEN -- Ajustar data se necessário
   
   --======= Pega as notas rejeitadas =======--
   
@@ -30,7 +38,7 @@ BEGIN
                                      AND C.DTALOG > SYSDATE - INTERVAL '1' HOUR - INTERVAL '10' MINUTE) 
                   AND N.DTAEMISSAO >= SYSDATE - 10
 
-      AND (SELECT COUNT(1) FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = N.SEQNF AND MOT = 'Total CBS/IBS') < 6
+      AND (SELECT COUNT(1) FROM NAGT_PALIAT_DEV D WHERE D.SEQNF = N.SEQNF AND MOT = 'Total CBS/IBS') < 6 -- Vai tentar reenviar ate 5x
       
    UNION
    SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/ 
@@ -172,3 +180,6 @@ BEGIN
      -- DBMS para nao estourar erro SQL caso outro problema surja ao rodar essa proc, nao para o processo
 
 END;
+
+-- Criar rotina/job para execução da procedure a cada 1 min
+-- A procedure vai pegar as notas rejeitadas, corrigir e reenviar para reprocessamento.
