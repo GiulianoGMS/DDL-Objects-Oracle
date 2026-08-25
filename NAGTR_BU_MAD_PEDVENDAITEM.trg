@@ -1,28 +1,35 @@
 CREATE OR REPLACE TRIGGER NAGTR_BU_MAD_PEDVENDAITEM
-
- -- Giuliano 18/08/26
- -- Atualiza = = = para recalcular a tributação do item na trigger da MAD_PEDVENDAITEM
-
 BEFORE UPDATE OF NROTABVENDASEQEMPFATX ON MAD_PEDVENDA
-  FOR EACH ROW
-  DECLARE
-  psTipoDoctoFiscal VARCHAR2(10);
 
+-- Ticket 741814
+-- Giuliano 24/08/26
+-- Recalcula o pedido ao faturar após virada do mes
+
+FOR EACH ROW
+DECLARE
+  psTipoDoctoFiscal VARCHAR2(10);
 BEGIN
-  
-  SELECT X.TIPDOCFISCAL
-    INTO psTipoDoctoFiscal
-    FROM MAX_CODGERALOPER X
-    WHERE X.CODGERALOPER = :OLD.CODGERALOPER;
-    
+ -- Só executa se a data de inclusao do pedido for do mes anterior
+  IF :OLD.DTAINCLUSAO >= TRUNC(ADD_MONTHS(SYSDATE, -1), 'MM')
+     AND :OLD.DTAINCLUSAO < TRUNC(SYSDATE, 'MM')
+     
+  THEN
+
+    SELECT X.TIPDOCFISCAL
+      INTO psTipoDoctoFiscal
+      FROM MAX_CODGERALOPER X
+     WHERE X.CODGERALOPER = :OLD.CODGERALOPER;
+
     IF psTipoDoctoFiscal = 'T'
-       AND :OLD.NROEMPRESA IN ( 1 )   
+       AND :OLD.NROEMPRESA > 500
     THEN
 
-  UPDATE MAC_GERCOMPRAITEM XI
-     SET XI.QTDPEDIDA = XI.QTDPEDIDA
-   WHERE XI.SEQGERCOMPRA = :OLD.NROPEDVENDA;
-   
+      UPDATE MAC_GERCOMPRAITEM XI
+         SET XI.QTDPEDIDA = XI.QTDPEDIDA
+       WHERE XI.SEQGERCOMPRA = :OLD.NROPEDVENDA;
+
     END IF;
+
+  END IF;
 
 END;
