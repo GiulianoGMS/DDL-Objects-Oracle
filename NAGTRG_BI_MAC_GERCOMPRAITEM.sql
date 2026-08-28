@@ -10,6 +10,7 @@ FOR EACH ROW
    psSeqFornec     MAF_FORNECEDOR.SEQFORNECEDOR%TYPE;
    psSeqComprador  MAX_COMPRADOR.SEQCOMPRADOR%TYPE;
    psIndAcataSug   NUMBER(10);
+   psCD            NUMBER(10);
 
 BEGIN
   
@@ -21,15 +22,18 @@ BEGIN
    SELECT MAX(C.SEQCOMPRADOR)
      INTO psSeqComprador
      FROM MAC_GERCOMPRA C
-    WHERE C.SEQGERCOMPRA = :NEW.SEQGERCOMPRA;
+    WHERE C.SEQGERCOMPRA = :NEW.SEQGERCOMPRA
+      AND C.TIPOLOTE = 'C';
+      
+   IF psSeqComprador IS NOT NULL THEN -- Segue
          
-   SELECT COUNT(1)
-     INTO psIndAcataSug
+   SELECT COUNT(1), COUNT(X.CD_AGRUP)
+     INTO psIndAcataSug, psCD
      FROM NAGT_COMP_FORN_SUGESTAUTO X
     WHERE psSeqComprador = X.SEQCOMPRADOR
       AND psSeqFornec = NVL(X.SEQFORNECEDOR, psSeqFornec);
       
-   IF psIndAcataSug > 0 THEN
+   IF psIndAcataSug > 0 AND psCD = 0 THEN
 
      IF NVL(:NEW.QTDSUGERIDAFORNEC, 0) > 0 THEN
         :NEW.QTDPEDIDA := :NEW.QTDSUGERIDAFORNEC;
@@ -40,4 +44,7 @@ BEGIN
    :NEW.SITUACAOITEM := 'S';
    
    END IF;
+   
+   END IF;
+   
 END;
