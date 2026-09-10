@@ -27,13 +27,24 @@ BEGIN
       
    IF psSeqComprador IS NOT NULL THEN -- Segue
          
-   SELECT COUNT(1), COUNT(X.CD_AGRUP)
-     INTO psIndAcataSug, psCD
+   SELECT COUNT(1)
+     INTO psIndAcataSug
      FROM NAGT_COMP_FORN_SUGESTAUTO X
     WHERE psSeqComprador = X.SEQCOMPRADOR
       AND psSeqFornec = NVL(X.SEQFORNECEDOR, psSeqFornec);
       
-   IF psIndAcataSug > 0 AND psCD = 0 THEN
+   IF psIndAcataSug > 0 THEN
+     
+       ----------------------------------------------------------------------
+        -- Se existir CD no lote, nao aciona essa trigger
+       ----------------------------------------------------------------------
+        SELECT COUNT(1)
+          INTO psCD
+          FROM MAC_GERCOMPRAEMP GE
+         WHERE GE.SEQGERCOMPRA = :NEW.SEQGERCOMPRA
+           AND GE.NROEMPRESA BETWEEN 500 AND 599;
+           
+           IF psCD = 0 THEN
 
      IF NVL(:NEW.QTDSUGERIDAFORNEC, 0) > 0 THEN
         :NEW.QTDPEDIDA := :NEW.QTDSUGERIDAFORNEC;
@@ -43,8 +54,8 @@ BEGIN
   
    :NEW.SITUACAOITEM := 'S';
    
-   END IF;
-   
+     END IF;  
+    END IF;
    END IF;
    
 END;
