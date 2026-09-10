@@ -15,7 +15,7 @@ COMPOUND TRIGGER
     v_itens t_itens;
     v_count NUMBER := 0;
 
-    -------------------------------------------------------------------------
+    --------------------------------------------------------------------------
     -- CAPTURA OS ITENS INSERIDOS
     --------------------------------------------------------------------------
     AFTER EACH ROW IS
@@ -23,13 +23,28 @@ COMPOUND TRIGGER
         psSeqFornec       MAF_FORNECEDOR.SEQFORNECEDOR%TYPE;
         psSeqComprador    MAX_COMPRADOR.SEQCOMPRADOR%TYPE;
         psIndAcataSug     NUMBER(10);
-
         v_cd_consolidacao NUMBER;
         v_perc_arred      NUMBER;
         v_ind_arred       VARCHAR2(1);
 
     BEGIN
+      
+        ----------------------------------------------------------------------
+        -- CD DE CONSOLIDAÇÃO
+        -- SOMENTE CONSIDERA EMPRESAS ENTRE 500 E 599.
+        -- O CD DE CONSOLIDAÇÃO SERÁ O MENOR CD DA COMPRA.
+        ----------------------------------------------------------------------
+        SELECT MIN(GE.NROEMPRESA)
+          INTO v_cd_consolidacao
+          FROM MAC_GERCOMPRAEMP GE
+         WHERE GE.SEQGERCOMPRA = :NEW.SEQGERCOMPRA
+           AND GE.NROEMPRESA BETWEEN 500 AND 599;
 
+        ----------------------------------------------------------------------
+        -- SE NÃO EXISTIR CD NA COMPRA, NÃO ATIVA A REGRA
+        ----------------------------------------------------------------------
+        IF v_cd_consolidacao IS NOT NULL THEN
+          
         ----------------------------------------------------------------------
         -- FORNECEDOR DA COMPRA
         ----------------------------------------------------------------------
@@ -54,11 +69,9 @@ COMPOUND TRIGGER
         IF psSeqComprador IS NOT NULL THEN
 
             SELECT COUNT(1),
-                   MAX(X.CD_AGRUP),
                    MAX(X.PERC_ARRED),
                    MAX(X.IND_ARRED)
               INTO psIndAcataSug,
-                   v_cd_consolidacao,
                    v_perc_arred,
                    v_ind_arred
               FROM NAGT_COMP_FORN_SUGESTAUTO X
@@ -81,9 +94,9 @@ COMPOUND TRIGGER
                 v_itens(v_count).perc_arred   := v_perc_arred;
                 v_itens(v_count).ind_arred    := v_ind_arred;
 
-            END IF;
-
+          END IF;
         END IF;
+      END IF;
 
     END AFTER EACH ROW;
 
@@ -127,7 +140,6 @@ COMPOUND TRIGGER
              WHERE M.NROEMPRESA = v_itens(i).nroempresa
                AND M.SEQPRODUTO = v_itens(i).seqproduto;
 
-
             ------------------------------------------------------------------
             -- QUANTIDADE DE EMBALAGEM
             ------------------------------------------------------------------
@@ -137,7 +149,6 @@ COMPOUND TRIGGER
              WHERE I.SEQGERCOMPRA = v_itens(i).seqgercompra
                AND I.SEQPRODUTO   = v_itens(i).seqproduto
                AND I.NROEMPRESA   = v_itens(i).nroempresa;
-
 
             ------------------------------------------------------------------
             -- SE IND_ARRED = 'S' E O PERCENTUAL GERAL ESTIVER NULL,
