@@ -28,7 +28,7 @@ COMPOUND TRIGGER
         v_ind_arred       VARCHAR2(1);
 
     BEGIN
-      
+
         ----------------------------------------------------------------------
         -- CD DE CONSOLIDAÇÃO
         -- SOMENTE CONSIDERA EMPRESAS ENTRE 500 E 599.
@@ -44,7 +44,7 @@ COMPOUND TRIGGER
         -- SE NÃO EXISTIR CD NA COMPRA, NÃO ATIVA A REGRA
         ----------------------------------------------------------------------
         IF v_cd_consolidacao IS NOT NULL THEN
-          
+
         ----------------------------------------------------------------------
         -- FORNECEDOR DA COMPRA
         ----------------------------------------------------------------------
