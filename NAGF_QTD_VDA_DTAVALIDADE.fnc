@@ -1,0 +1,33 @@
+CREATE OR REPLACE FUNCTION NAGF_QTD_VDA_DTAVALIDADE (psSeqProduto NUMBER, psNroEmpresa NUMBER, psData DATE)
+
+RETURN NUMBER IS
+  psQtdVenda NUMBER(10,3);
+
+BEGIN
+
+SELECT /*+OPTIMIZER_FEATURES_ENABLE('11.2.0.4')*/
+       NVL(SUM(XI.QUANTIDADE),0) QTD_VENDIDA
+  INTO psQtdVenda
+       
+       
+  FROM MFL_DOCTOFISCAL X INNER JOIN MFL_DFITEM XI ON XI.SEQNF = X.SEQNF
+                          LEFT JOIN MRL_PROMOCESPECIALHIST A ON XI.SEQPRODUTO = A.SEQPRODUTO
+                                                         AND DTAMOVIMENTO BETWEEN DTAINICIO AND DTAFIM
+                                                         AND X.NROEMPRESA = A.NROEMPRESA
+                                                         AND X.DTAMOVIMENTO BETWEEN DTAINICIO AND DTAFIM
+                                                         AND A.CODACESSOESPECIAL = XI.CODPRODUTO
+                          LEFT JOIN MRL_PROMOCAO P ON P.SEQPROMOCAO = XI.SEQPROMOCAO AND P.SEQGRUPOPROMOC = 10
+
+ WHERE 1=1
+ 
+   AND X.STATUSDF != 'C'
+   AND X.NROEMPRESA = psNroEmpresa
+   AND XI.STATUSITEM != 'C'
+   AND DTAMOVIMENTO = psData
+   AND XI.SEQPRODUTO = psSeqProduto
+   
+ GROUP BY X.NROEMPRESA, XI.SEQPRODUTO;
+ 
+ RETURN psQtdVenda;
+ 
+END;
