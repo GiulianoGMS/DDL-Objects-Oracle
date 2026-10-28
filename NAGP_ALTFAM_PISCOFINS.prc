@@ -8,13 +8,10 @@ CREATE OR REPLACE PROCEDURE NAGP_ALTFAM_PISCOFINS (psAliquota NUMBER, psAjuste V
   vListaTributacao VARCHAR2(4000);
 
 BEGIN
-   
-  /*FOR t IN (SELECT DISTINCT A.SEQFAMILIA FROM NAGT_BASE_ALT_PISCOFINS10 A \* << Tabela com os SeqFamilias a serem alterados *\ INNER JOIN MAP_FAMDIVISAO F ON F.SEQFAMILIA = A.SEQFAMILIA
-              WHERE F.PERDESPESADIVISAO IS NULL*/
               
    SP_BUSCAPARAMDINAMICO('NAGUMO',0,'OBS_INFOADFISCO_TRIB','S', NULL,
                           'Lista de Tributacoes que emitem obs na tag InfoAdFisco (Operacao esta sujeita ao disposto na Lei Complementar n 224 de 2025)', vListaTributacao);
-   -- Insere 
+   -- Insere ERP
             
    FOR t IN (SELECT SEQFAMILIA FROM MAP_FAMDIVISAO C 
               WHERE C.NROTRIBUTACAO  IN (
@@ -32,6 +29,14 @@ BEGIN
                        AND (psAjuste = 'A'
                         OR (psAjuste != 'A' AND NVL(F.PERDESPESADIVISAO,0) >= psAliquota));
     
+    -- Insere PDV
+    
+    UPDATE MONITORPDV.TB_FAMILIA a
+       SET a.PREENCHERINFADFISCO = 'S'
+     WHERE NVL(a.PREENCHERINFADFISCO, 'N') <> 'S'
+       AND A.SEQFAMILIA = t.SEQFAMILIA
+       AND psAjuste = 'A';
+    
     IF i  = 100 THEN COMMIT;
        i := 0;
         
@@ -39,7 +44,7 @@ BEGIN
     COMMIT;
     END LOOP;
     
-    -- Exclui
+    -- Inativa ERP
     
     FOR t IN (SELECT SEQFAMILIA FROM MAP_FAMDIVISAO C 
               WHERE NOT C.NROTRIBUTACAO  IN (
@@ -55,6 +60,14 @@ BEGIN
                                  F.DTAHORALTERACAO   = SYSDATE
                      WHERE F.SEQFAMILIA = T.SEQFAMILIA
                        AND psAjuste = 'A';
+    
+    -- Inativa PDV
+        
+    UPDATE MONITORPDV.TB_FAMILIA a
+       SET a.PREENCHERINFADFISCO = 'N'
+     WHERE NVL(a.PREENCHERINFADFISCO, 'N') <> 'N'
+       AND A.SEQFAMILIA = t.SEQFAMILIA
+       AND psAjuste = 'A';
     
     IF i  = 100 THEN COMMIT;
        i := 0;
